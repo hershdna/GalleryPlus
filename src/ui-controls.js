@@ -3,17 +3,28 @@ import { transitionTo } from './transitions.js';
 
 export function wireViewer(root) {
   if (!root || root.dataset.gpWired === '1') return;
-  root.dataset.gpWired = '1';
 
   const pcBar = root.querySelector('.panelControlBar');
   if (!pcBar) return;
 
-  initializeGalleryList(root);
   injectLeftControls(root, pcBar);
-  wireZoomAndPan(root);
-  wireKeyboardNav(root);
-  applyDefaultRect(root);
-  wireFullscreenStateSync(root);
+  root.dataset.gpWired = '1';
+
+  const setupSteps = [
+    ['gallery list', initializeGalleryList],
+    ['zoom and pan', wireZoomAndPan],
+    ['keyboard navigation', wireKeyboardNav],
+    ['default viewer position', applyDefaultRect],
+    ['fullscreen state', wireFullscreenStateSync],
+  ];
+
+  for (const [name, setup] of setupSteps) {
+    try {
+      setup(root);
+    } catch (error) {
+      console.error(`[GalleryPlus] Failed to initialize ${name}`, error);
+    }
+  }
 }
 
 function injectLeftControls(root, pcBar) {
@@ -372,7 +383,9 @@ function initializeGalleryList(root) {
   root._gpGalleryList = galleryList ?? readVisibleGalleryList();
 
   const folderInput = document.querySelector('#gallery .gallery-folder-input');
-  root._gpGalleryFolder = folderInput instanceof HTMLInputElement ? folderInput.value : '';
+  root._gpGalleryFolder = folderInput && 'value' in folderInput
+    ? String(folderInput.value || '')
+    : '';
 
   const img = root.querySelector('img');
   try {
@@ -542,3 +555,4 @@ function preload(src) {
   i.loading = 'eager';
   i.src = src;
 }
+
