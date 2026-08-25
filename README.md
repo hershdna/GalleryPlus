@@ -1,63 +1,54 @@
 # GalleryPlus
 
-=======
-GalleryPlus is an extension for [SillyTavern](https://github.com/SillyTavern/SillyTavern) that enhances the built-in image gallery with powerful navigation and slideshow controls.
+GalleryPlus enhances SillyTavern's built-in gallery with a playable slideshow,
+custom image ordering, and safe gallery organization.
 
 ## Features
-- Left-aligned controls for saving, searching, play/pause, fullscreen, a speed slider, and transition selector
-- Scroll-wheel zoom or optional hover-zoom with click-and-drag panning when hover-zoom is disabled
-- Slideshow support with multiple transitions: crossfade, spiral sweep, horizontal push, and vertical push
-- Preloads the next image for smoother playback and supports keyboard navigation and theme-aware highlights
-- Respects MovingUI drag/resize behaviour and offers fullscreen toggling
 
-## Installation
-1. Download or clone this repository.
-2. Copy the `GalleryPlus` folder into SillyTavern's `extensions` directory.
-3. Restart SillyTavern and enable **GalleryPlus** from the extensions menu.
+- Slideshow playback across the complete gallery, including paginated images
+- Previous/next, play/pause, fullscreen, speed, Cut/Fade, and randomize controls
+- Slideshow playback and live image synchronization after the gallery closes
+- Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
+- A **Custom** gallery sort mode with drag-and-drop thumbnail reordering
+- Safe Remove mode that moves files to `<gallery folder>/deprecated`
+- Scroll-wheel or hover zoom and click-and-drag panning
 
-## Configuration
-Open the extension settings via SillyTavern's gear icon. Options include:
-- Enable/disable the extension
-- Toggle hover zoom and adjust zoom scale
-- Set slideshow speed and transition style
-- Show or hide image captions
-- Restrict to WebP images only
+## Frontend installation
 
-## Building and Packaging
-No build step is required to run the extension. To create a packaged build for distribution:
-1. Install Node.js and [web-ext](https://extensionworkshop.com/documentation/develop/web-ext-command-reference/):
-   ```bash
-   npm install --global web-ext
-   ```
-2. Run `web-ext build` in the project root to produce a ZIP file in `web-ext-artifacts/`.
+Install this repository as a SillyTavern third-party extension, or copy it into
+SillyTavern's third-party extensions directory.
 
-## Contributing
-Pull requests and issue reports are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-=======
+## Required server plugin for safe removal
+
+Custom ordering works in the frontend alone. Moving removed images into the
+nested `deprecated` folder requires the included opt-in server plugin:
+
+1. Copy `server-plugin` to `SillyTavern/plugins/galleryplus`.
+2. Set `enableServerPlugins: true` in SillyTavern's `config.yaml`.
+3. Restart SillyTavern.
+
+The server plugin validates the gallery folder and filename, creates the
+`deprecated` directory when needed, and moves the file. If a filename already
+exists there, it adds a numeric suffix instead of overwriting it.
+
+## Using custom order
+
+Choose **Custom** in the gallery's order dropdown, then drag thumbnails to the
+desired position. Reordering automatically switches the gallery to Custom.
+Newly added files are appended to the stored custom order.
+
+## Removing an image
+
+Click the archive-box control next to the gallery folder field to enable Remove
+mode, then click an image and confirm. The original file is moved into the
+source gallery's `deprecated` subfolder; it is never permanently deleted.
 
 ## Development
 
-Install dependencies:
+The modular source is in `src/`. Build the release script with:
 
-```bash
-npm install
-```
-
-Run linters and formatter:
-
-```bash
-npm run lint
-npm run format
-```
-=======
-Source code is organized in `src/` modules. To build the release script:
-
-```
+```sh
 npm install
 npm run build
 ```
 
-This bundles the modules back into `index.js`.
-=======
-## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

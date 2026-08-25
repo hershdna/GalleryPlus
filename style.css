@@ -70,6 +70,30 @@
   color: inherit;
 }
 
+/* ===== Gallery organization ===== */
+.gp-custom-order-hint {
+  margin-left: 6px;
+  font-size: 0.8em;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.gp-reorderable-thumbnail {
+  cursor: grab !important;
+}
+.gp-reorderable-thumbnail.gp-dragging {
+  cursor: grabbing !important;
+  opacity: 0.45;
+}
+.gp-reorderable-thumbnail.gp-drop-target {
+  outline: 3px solid var(--SmartThemeUnderlineColor, #7aa2f7);
+  outline-offset: -3px;
+}
+.gp-archive-mode.gp-busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 /* ===== Themed window glow ===== */
 #gallery.draggable,
 #gallery.draggable .galleryImageDraggable.draggable,
@@ -125,3 +149,4 @@
   left: 10px;
   z-index: 2;
 }
+

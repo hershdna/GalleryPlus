@@ -2,7 +2,7 @@
   'use strict';
 
   const EXT_ID = 'GalleryPlus';
-
+  
   const DEFAULTS = {
     enabled: true,
     diag: Date.now(),
@@ -15,8 +15,9 @@
     webpOnly: false,
     slideshowSpeedSec: 3,
     slideshowTransition: 'fade',
+    customOrders: {},
   };
-
+  
   function ctx() {
     try {
       return window.SillyTavern?.getContext?.();
@@ -24,7 +25,7 @@
       return null;
     }
   }
-
+  
   function _settingsBag() {
     const c = ctx();
     if (c?.extensionSettings) {
@@ -47,15 +48,16 @@
       return init;
     }
   }
-
+  
   function gpSettings() {
     return _settingsBag();
   }
-
+  
   function gpSaveSettings(partial = {}) {
     const c = ctx();
     if (c?.extensionSettings) {
       c.extensionSettings[EXT_ID] = { ..._settingsBag(), ...partial };
+      c.saveSettingsDebounced?.();
     } else {
       const merged = { ..._settingsBag(), ...partial };
       localStorage.setItem('GP_SETTINGS', JSON.stringify(merged));
@@ -69,7 +71,7 @@
     if (ms < 1000) ms = 1000;
     return ms;
   }
-
+  
   function ensureLayerWrap(baseImg) {
     let wrap = baseImg.parentElement;
     if (!wrap || !wrap.classList?.contains('gp-layer-wrap')) {
@@ -82,19 +84,19 @@
     baseImg.classList.add('gp-layer', 'base');
     return wrap;
   }
-
+  
   function beginTransition(root, baseImg) {
     const id = (Number(root._gpTransitionId) || 0) + 1;
     root._gpTransitionId = id;
-
+  
     const wrap = baseImg.parentElement;
     if (wrap?.classList?.contains('gp-layer-wrap')) {
       wrap.querySelectorAll('.gp-layer.next').forEach(layer => layer.remove());
     }
-
+  
     return id;
   }
-
+  
   function transitionTo(root, baseImg, nextSrc) {
     const requested = root.dataset.gpTransition || gpSettings().slideshowTransition;
     if (requested === 'cut') {
@@ -103,12 +105,12 @@
       transitionFade(root, baseImg, nextSrc);
     }
   }
-
+  
   function transitionCut(root, baseImg, nextSrc) {
     beginTransition(root, baseImg);
     baseImg.src = nextSrc;
   }
-
+  
   function transitionFade(root, baseImg, nextSrc) {
     const id = beginTransition(root, baseImg);
     const wrap = ensureLayerWrap(baseImg);
@@ -117,7 +119,7 @@
     next.src = nextSrc;
     next.style.opacity = '0';
     wrap.appendChild(next);
-
+  
     const ms = getTransitionMs();
     next.style.transition = `opacity ${ms}ms ease`;
     requestAnimationFrame(() => { next.style.opacity = '1'; });
@@ -133,13 +135,13 @@
 
   function wireViewer(root) {
     if (!root || root.dataset.gpWired === '1') return;
-
+  
     const pcBar = root.querySelector('.panelControlBar');
     if (!pcBar) return;
-
+  
     injectLeftControls(root, pcBar);
     root.dataset.gpWired = '1';
-
+  
     const setupSteps = [
       ['gallery list', initializeGalleryList],
       ['zoom and pan', wireZoomAndPan],
@@ -147,7 +149,7 @@
       ['default viewer position', applyDefaultRect],
       ['fullscreen state', wireFullscreenStateSync],
     ];
-
+  
     for (const [name, setup] of setupSteps) {
       try {
         setup(root);
@@ -156,7 +158,7 @@
       }
     }
   }
-
+  
   function injectLeftControls(root, pcBar) {
     let left = root.querySelector(':scope > .gp-controls-left');
     if (!left) {
@@ -166,7 +168,7 @@
     } else {
       left.innerHTML = '';
     }
-
+  
     // 💾 save default size/pos
     const saveBtn = document.createElement('button');
     saveBtn.className = 'gp-btn gp-save';
@@ -178,7 +180,7 @@
     saveIcon.textContent = '💾';
     saveBtn.appendChild(saveIcon);
     saveBtn.addEventListener('click', () => saveDefaultRect(root));
-
+  
     // 🔍 toggle hover zoom
     const zoomBtn = document.createElement('button');
     zoomBtn.className = 'gp-btn gp-zoom';
@@ -195,14 +197,14 @@
       gpSaveSettings({ hoverZoom: ns });
       zoomBtn.classList.toggle('active', ns);
     });
-
+  
     function stepSlideshow(direction) {
       if (direction < 0) goPrev(root); else goNext(root);
       if (root.dataset.gpPlaying === '1') {
         scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
       }
     }
-
+  
     // ⏮️ previous image
     const prevBtn = document.createElement('button');
     prevBtn.className = 'gp-btn gp-prev';
@@ -214,7 +216,7 @@
     prevIcon.textContent = '⏮️';
     prevBtn.appendChild(prevIcon);
     prevBtn.addEventListener('click', () => stepSlideshow(-1));
-
+  
     // ⏯️ start/pause slideshow
     const playBtn = document.createElement('button');
     playBtn.className = 'gp-btn gp-play';
@@ -229,7 +231,7 @@
       if (root.dataset.gpPlaying === '1') stopSlideshow(root);
       else startSlideshow(root);
     });
-
+  
     // ⏭️ next image
     const nextBtn = document.createElement('button');
     nextBtn.className = 'gp-btn gp-next';
@@ -241,7 +243,7 @@
     nextIcon.textContent = '⏭️';
     nextBtn.appendChild(nextIcon);
     nextBtn.addEventListener('click', () => stepSlideshow(1));
-
+  
     // 🔀 randomize slideshow order
     const randomBtn = document.createElement('button');
     randomBtn.className = 'gp-btn gp-random';
@@ -253,7 +255,7 @@
     randomIcon.textContent = '🔀';
     randomBtn.appendChild(randomIcon);
     randomBtn.addEventListener('click', () => randomizeGalleryOrder(root));
-
+  
     // ⛶ fullscreen
     const fsBtn = document.createElement('button');
     fsBtn.className = 'gp-btn gp-fs';
@@ -265,7 +267,7 @@
     fsIcon.textContent = '⛶';
     fsBtn.appendChild(fsIcon);
     fsBtn.addEventListener('click', () => toggleFullscreen(root));
-
+  
     // speed slider
     const speedWrap = document.createElement('div');
     speedWrap.className = 'gp-speed-wrap';
@@ -278,12 +280,12 @@
     speed.value = String(gpSettings().slideshowSpeedSec ?? 3);
     speed.title = 'Slideshow delay (seconds)';
     speed.setAttribute('aria-label', speed.title);
-
+  
     const speedValue = document.createElement('output');
     speedValue.className = 'gp-speed-value';
     speedValue.title = 'Time between images';
     speedValue.setAttribute('aria-live', 'polite');
-
+  
     function refreshSpeedDisplay() {
       const delay = parseFloat(speed.value || '3');
       speedValue.textContent = `${delay.toFixed(1)}s`;
@@ -301,7 +303,7 @@
     refreshSpeedDisplay();
     speedWrap.appendChild(speed);
     speedWrap.appendChild(speedValue);
-
+  
     // transition select
     const sel = document.createElement('select');
     sel.className = 'gp-transition';
@@ -326,7 +328,7 @@
       root.dataset.gpTransition = v;
       gpSaveSettings({ slideshowTransition: v });
     });
-
+  
     left.appendChild(saveBtn);
     left.appendChild(zoomBtn);
     left.appendChild(prevBtn);
@@ -349,31 +351,31 @@
     root.classList.add('gp-saved-pulse');
     setTimeout(() => root.classList.remove('gp-saved-pulse'), 350);
   }
-
+  
   function applyDefaultRect(root) {
     const r = gpSettings().viewerRect;
     if (!r) return;
     const st = root.style;
     st.top = r.top; st.left = r.left; st.width = r.width; st.height = r.height;
   }
-
+  
   function wireZoomAndPan(root) {
     const img = root.querySelector('img');
     if (!img) return;
-
+  
     let scale = 1;
     let tx = 0, ty = 0;
-
+  
     let isPanning = false;
     let panStartX = 0, panStartY = 0;
     let panBaseX = 0, panBaseY = 0;
-
+  
     function applyTransform() {
       img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
       img.style.transformOrigin = 'center center';
       img.style.willChange = 'transform';
     }
-
+  
     function onWheel(e) {
       if (gpSettings().hoverZoom) return;
       if (!e.ctrlKey) {
@@ -393,7 +395,7 @@
         }
       }
     }
-
+  
     function onMoveHover(e) {
       if (!gpSettings().hoverZoom) return;
       const rect = img.getBoundingClientRect();
@@ -410,7 +412,7 @@
       scale = 1; tx = 0; ty = 0;
       applyTransform();
     }
-
+  
     function onMouseDown(e) {
       if (gpSettings().hoverZoom) return;
       if (e.button !== 0) return;
@@ -438,15 +440,15 @@
       root.classList.remove('gp-panning');
       window.removeEventListener('mousemove', onMouseMovePan);
     }
-
+  
     root.addEventListener('wheel', onWheel, { passive: false });
     root.addEventListener('mousemove', onMoveHover);
     root.addEventListener('mouseleave', onLeaveHover);
     img.addEventListener('mousedown', onMouseDown);
-
+  
     applyTransform();
   }
-
+  
   function wireKeyboardNav(root) {
     function handler(e) {
       if (!document.body.contains(root)) {
@@ -458,14 +460,14 @@
         return;
       }
       if (!e.ctrlKey || e.repeat) return;
-
+  
       if (e.key === 'ArrowRight') { e.preventDefault(); goNext(root); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(root); }
       else if (e.key === ' ') { e.preventDefault(); root.dataset.gpPlaying === '1' ? stopSlideshow(root) : startSlideshow(root); }
     }
     document.addEventListener('keydown', handler);
   }
-
+  
   function toggleFullscreen(root) {
     const isFS = document.fullscreenElement === root;
     if (isFS) {
@@ -474,7 +476,7 @@
       root.requestFullscreen?.({ navigationUI: 'hide' }).catch(()=>{});
     }
   }
-
+  
   function wireFullscreenStateSync(root) {
     function onFSChange() {
       const isFS = document.fullscreenElement === root;
@@ -489,7 +491,7 @@
     });
     obs.observe(document.body, { childList: true, subtree: true });
   }
-
+  
   function startSlideshow(root) {
     root.dataset.gpPlaying = '1';
     scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
@@ -506,7 +508,7 @@
       scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
     }, Math.max(100, secs * 1000));
   }
-
+  
   function goNext(root) {
     const list = currentGalleryList(root);
     const img = root.querySelector('img');
@@ -525,11 +527,11 @@
     transitionTo(root, img, list[prevIdx]);
     preload(list[(prevIdx - 1 + list.length) % list.length]);
   }
-
+  
   function randomizeGalleryOrder(root) {
     const list = [...currentGalleryList(root)];
     if (list.length < 2) return;
-
+  
     const img = root.querySelector('img');
     const currentIndex = img ? indexInList(list, img.src) : -1;
     const current = currentIndex >= 0 ? list.splice(currentIndex, 1)[0] : null;
@@ -537,7 +539,7 @@
     root._gpGalleryList = current ? [current, ...list] : list;
     root.dataset.gpRandomized = '1';
   }
-
+  
   function shuffleInPlace(items) {
     for (let i = items.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -545,45 +547,45 @@
     }
     return items;
   }
-
+  
   function initializeGalleryList(root) {
     const galleryList = readGalleryDataList();
     root._gpGalleryList = galleryList ?? readVisibleGalleryList();
-
+  
     const folderInput = document.querySelector('#gallery .gallery-folder-input');
     root._gpGalleryFolder = folderInput && 'value' in folderInput
       ? String(folderInput.value || '')
       : '';
-
+  
     const img = root.querySelector('img');
     try {
       root._gpGalleryBaseUrl = img?.src ? new URL('.', img.src).href : '';
     } catch {
       root._gpGalleryBaseUrl = '';
     }
-
+  
     scheduleGalleryListSync(root);
   }
-
+  
   function scheduleGalleryListSync(root) {
     async function sync() {
       root._gpListTimer = null;
       if (!document.body.contains(root)) return;
-
+  
       await refreshGalleryList(root);
-
+  
       if (document.body.contains(root)) {
         root._gpListTimer = setTimeout(sync, 2000);
       }
     }
-
+  
     root._gpListTimer = setTimeout(sync, 2000);
   }
-
+  
   async function refreshGalleryList(root) {
     const updated = await fetchGalleryList(root);
     if (updated === null) return;
-
+  
     const current = Array.isArray(root._gpGalleryList) ? root._gpGalleryList : [];
     const next = root.dataset.gpRandomized === '1'
       ? mergeRandomizedGalleryList(current, updated)
@@ -592,20 +594,20 @@
       root._gpGalleryList = next;
     }
   }
-
+  
   function mergeRandomizedGalleryList(current, updated) {
     const available = new Set(updated);
     const merged = current.filter(item => available.has(item));
     const included = new Set(merged);
     const added = shuffleInPlace(updated.filter(item => !included.has(item)));
-
+  
     for (const item of added) {
       const insertAt = Math.floor(Math.random() * (merged.length + 1));
       merged.splice(insertAt, 0, item);
     }
     return merged;
   }
-
+  
   async function fetchGalleryList(root) {
     const context = getSillyTavernContext();
     if (root._gpGalleryFolder && root._gpGalleryBaseUrl) {
@@ -617,7 +619,7 @@
           dateDesc: ['date', 'desc'],
           dateAsc: ['date', 'asc'],
         }[sortValue] ?? ['date', 'asc'];
-
+  
         const response = await fetch('/api/images/list', {
           method: 'POST',
           headers: context?.getRequestHeaders?.() ?? { 'Content-Type': 'application/json' },
@@ -628,7 +630,7 @@
           }),
         });
         if (!response.ok) return await fetchGalleryListFromCommand(context);
-
+  
         const files = await response.json();
         if (!Array.isArray(files)) return null;
         return normalizeGalleryUrls(files.map(file => new URL(String(file), root._gpGalleryBaseUrl).href));
@@ -636,13 +638,13 @@
         // Fall through to SillyTavern's gallery command for compatibility.
       }
     }
-
+  
     return await fetchGalleryListFromCommand(context);
   }
-
+  
   async function fetchGalleryListFromCommand(context) {
     if (typeof context?.executeSlashCommandsWithOptions !== 'function') return null;
-
+  
     try {
       const result = await context.executeSlashCommandsWithOptions('/list-gallery', {
         handleParserErrors: false,
@@ -656,7 +658,7 @@
       return null;
     }
   }
-
+  
   function getSillyTavernContext() {
     try {
       return window.SillyTavern?.getContext?.() ?? null;
@@ -664,14 +666,14 @@
       return null;
     }
   }
-
+  
   function readGalleryDataList() {
     const jq = window.jQuery || window.$;
     if (typeof jq !== 'function') return null;
-
+  
     const gallery = jq('#dragGallery');
     if (!gallery.length || typeof gallery.nanogallery2 !== 'function') return null;
-
+  
     try {
       const items = gallery.nanogallery2('data')?.items;
       if (!Array.isArray(items)) return null;
@@ -682,7 +684,7 @@
       return null;
     }
   }
-
+  
   function readVisibleGalleryList() {
     const out = [];
     const thumbs = document.querySelectorAll('#dragGallery img.nGY2GThumbnailImg, #dragGallery .nGY2GThumbnailImage.nGY2TnImg');
@@ -696,7 +698,7 @@
     });
     return normalizeGalleryUrls(out);
   }
-
+  
   function normalizeGalleryUrls(items) {
     const out = [];
     const seen = new Set();
@@ -715,11 +717,11 @@
     }
     return out;
   }
-
+  
   function sameGalleryList(a, b) {
     return a.length === b.length && a.every((item, index) => item === b[index]);
   }
-
+  
   function currentGalleryList(root) {
     if (!Array.isArray(root._gpGalleryList)) {
       root._gpGalleryList = readGalleryDataList() ?? readVisibleGalleryList();
@@ -731,7 +733,7 @@
     const target = norm(src);
     return list.findIndex(u => norm(u) === target);
   }
-
+  
   function preload(src) {
     if (!src) return;
     const i = new Image();
@@ -740,18 +742,361 @@
     i.src = src;
   }
 
+  const CUSTOM_SORT = 'custom';
+  const ARCHIVE_ENDPOINT = '/api/plugins/galleryplus/archive';
+  let archiveModeActive = false;
+  let fetchHookInstalled = false;
+  
+  function installCustomOrderFetchHook() {
+    if (fetchHookInstalled) return;
+    fetchHookInstalled = true;
+  
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async function galleryPlusFetch(input, init) {
+      const response = await nativeFetch(input, init);
+      try {
+        const url = typeof input === 'string' ? input : input?.url;
+        const pathname = new URL(url, location.href).pathname;
+        if (pathname !== '/api/images/list' || getGallerySort() !== CUSTOM_SORT || !response.ok) {
+          return response;
+        }
+  
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        const folder = typeof body?.folder === 'string' ? body.folder : '';
+        if (!folder) return response;
+  
+        const files = await response.clone().json();
+        if (!Array.isArray(files)) return response;
+  
+        const ordered = applyStoredOrder(folder, files.map(String));
+        const headers = new Headers(response.headers);
+        headers.delete('content-length');
+        return new Response(JSON.stringify(ordered), {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      } catch (error) {
+        console.warn('[GalleryPlus] Could not apply custom gallery order', error);
+        return response;
+      }
+    };
+  }
+  
+  function wireGallery(root) {
+    if (!(root instanceof HTMLElement) || root.dataset.gpGalleryWired === '1') return;
+  
+    const sortSelect = root.querySelector('.gallery-sort-select');
+    const gallery = root.querySelector('#dragGallery');
+    if (!(sortSelect instanceof HTMLSelectElement) || !(gallery instanceof HTMLElement)) return;
+  
+    root.dataset.gpGalleryWired = '1';
+    ensureCustomSortOption(sortSelect);
+    installArchiveControl(root, gallery, sortSelect);
+    installReordering(root, gallery, sortSelect);
+    updateCustomOrderHint(root, sortSelect);
+  
+    sortSelect.addEventListener('change', () => updateCustomOrderHint(root, sortSelect));
+  }
+  
+  function ensureCustomSortOption(select) {
+    if (!select.querySelector(`option[value="${CUSTOM_SORT}"]`)) {
+      const option = document.createElement('option');
+      option.value = CUSTOM_SORT;
+      option.textContent = 'Custom';
+      select.appendChild(option);
+    }
+    select.value = getGallerySort();
+  }
+  
+  function updateCustomOrderHint(root, select) {
+    let hint = root.querySelector('.gp-custom-order-hint');
+    if (select.value !== CUSTOM_SORT) {
+      hint?.remove();
+      return;
+    }
+    if (!hint) {
+      hint = document.createElement('span');
+      hint.className = 'gp-custom-order-hint';
+      hint.textContent = 'Drag thumbnails to reorder';
+      select.insertAdjacentElement('afterend', hint);
+    }
+  }
+  
+  function installArchiveControl(root, gallery, sortSelect) {
+    const folderInput = root.querySelector('.gallery-folder-input');
+    const topBar = folderInput?.parentElement;
+    const nativeDelete = topBar?.querySelector('.fa-trash');
+    const button = nativeDelete?.cloneNode(false) ?? document.createElement('div');
+    button.classList.add('right_menu_button', 'fa-solid', 'fa-box-archive', 'fa-fw', 'gp-archive-mode');
+    button.classList.remove('fa-trash');
+    button.classList.toggle('warning', archiveModeActive);
+    button.title = 'Remove mode (moves images to the deprecated folder)';
+    button.setAttribute('role', 'button');
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-pressed', String(archiveModeActive));
+  
+    button.addEventListener('click', () => {
+      archiveModeActive = !archiveModeActive;
+      button.classList.toggle('warning', archiveModeActive);
+      button.setAttribute('aria-pressed', String(archiveModeActive));
+      if (archiveModeActive) {
+        notify('info', 'Remove mode is ON. Click an image to move it into the deprecated folder.');
+      }
+    });
+  
+    if (nativeDelete) nativeDelete.replaceWith(button);
+    else topBar?.appendChild(button);
+  
+    gallery.addEventListener('click', async (event) => {
+      if (!archiveModeActive) return;
+      const thumbnail = event.target instanceof Element ? event.target.closest('.nGY2GThumbnail') : null;
+      if (!(thumbnail instanceof HTMLElement)) return;
+  
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+  
+      const filename = getThumbnailFilename(thumbnail);
+      const folder = getGalleryFolder(root);
+      if (!filename || !folder) {
+        notify('error', 'Could not determine the gallery file to remove.');
+        return;
+      }
+      if (!window.confirm(`Move "${filename}" to "${folder}/deprecated"?`)) return;
+  
+      button.classList.add('gp-busy');
+      try {
+        const response = await fetch(ARCHIVE_ENDPOINT, {
+          method: 'POST',
+          headers: getRequestHeaders(),
+          body: JSON.stringify({ folder, filename }),
+        });
+        if (!response.ok) {
+          const message = response.status === 404
+            ? 'GalleryPlus server plugin is not installed. See the GalleryPlus README.'
+            : await response.text();
+          throw new Error(message || `Archive failed with status ${response.status}`);
+        }
+  
+        removeFromStoredOrder(folder, filename);
+        notify('success', `Moved "${filename}" to the deprecated folder.`);
+        refreshGallery(sortSelect);
+      } catch (error) {
+        console.error('[GalleryPlus] Failed to archive gallery image', error);
+        notify('error', error?.message || 'Failed to move the image.');
+      } finally {
+        button.classList.remove('gp-busy');
+      }
+    }, true);
+  }
+  
+  function installReordering(root, gallery, sortSelect) {
+    const decorate = () => {
+      gallery.querySelectorAll('.nGY2GThumbnail').forEach((thumbnail) => {
+        if (thumbnail instanceof HTMLElement) {
+          thumbnail.draggable = true;
+          thumbnail.classList.add('gp-reorderable-thumbnail');
+        }
+      });
+    };
+  
+    const observer = new MutationObserver(decorate);
+    observer.observe(gallery, { childList: true, subtree: true });
+    decorate();
+  
+    gallery.addEventListener('dragstart', (event) => {
+      const thumbnail = event.target instanceof Element ? event.target.closest('.nGY2GThumbnail') : null;
+      if (!(thumbnail instanceof HTMLElement)) return;
+      const filename = getThumbnailFilename(thumbnail);
+      if (!filename) return;
+      root.dataset.gpDraggedFilename = filename;
+      thumbnail.classList.add('gp-dragging');
+      event.dataTransfer?.setData('text/plain', filename);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    });
+  
+    gallery.addEventListener('dragover', (event) => {
+      const thumbnail = event.target instanceof Element ? event.target.closest('.nGY2GThumbnail') : null;
+      if (!(thumbnail instanceof HTMLElement) || !root.dataset.gpDraggedFilename) return;
+      event.preventDefault();
+      gallery.querySelectorAll('.gp-drop-target').forEach(el => el.classList.remove('gp-drop-target'));
+      thumbnail.classList.add('gp-drop-target');
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    });
+  
+    gallery.addEventListener('drop', (event) => {
+      const thumbnail = event.target instanceof Element ? event.target.closest('.nGY2GThumbnail') : null;
+      const dragged = root.dataset.gpDraggedFilename || event.dataTransfer?.getData('text/plain');
+      const target = thumbnail instanceof HTMLElement ? getThumbnailFilename(thumbnail) : '';
+      clearDragState(root, gallery);
+      if (!dragged || !target || dragged === target) return;
+      event.preventDefault();
+  
+      const folder = getGalleryFolder(root);
+      const allFiles = readGalleryFilenames();
+      const order = getStoredOrder(folder, allFiles);
+      const rect = thumbnail.getBoundingClientRect();
+      const placeAfter = event.clientX > rect.left + rect.width / 2;
+      const reordered = reorderFiles(order, dragged, target, placeAfter);
+      if (sameList(order, reordered)) return;
+      saveStoredOrder(folder, reordered);
+      setGallerySort(CUSTOM_SORT);
+      sortSelect.value = CUSTOM_SORT;
+      refreshGallery(sortSelect);
+    });
+  
+    gallery.addEventListener('dragend', () => clearDragState(root, gallery));
+  }
+  
+  function clearDragState(root, gallery) {
+    delete root.dataset.gpDraggedFilename;
+    gallery.querySelectorAll('.gp-dragging, .gp-drop-target').forEach((el) => {
+      el.classList.remove('gp-dragging', 'gp-drop-target');
+    });
+  }
+  
+  function refreshGallery(select) {
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  
+  function getGalleryFolder(root) {
+    const input = root.querySelector('.gallery-folder-input');
+    return input && 'value' in input ? String(input.value || '') : '';
+  }
+  
+  function getThumbnailFilename(thumbnail) {
+    const title = thumbnail.getAttribute('title') || '';
+    if (title) return title;
+    const source = thumbnail.querySelector('img')?.src || '';
+    try {
+      return decodeURIComponent(new URL(source, location.href).pathname.split('/').pop() || '');
+    } catch {
+      return '';
+    }
+  }
+  
+  function readGalleryFilenames() {
+    const jq = window.jQuery || window.$;
+    if (typeof jq !== 'function') return [];
+    try {
+      const items = jq('#dragGallery').nanogallery2('data')?.items;
+      if (!Array.isArray(items)) return [];
+      return items.map(item => {
+        const source = typeof item?.responsiveURL === 'function' ? item.responsiveURL() : item?.src;
+        try {
+          return decodeURIComponent(new URL(source, location.href).pathname.split('/').pop() || '');
+        } catch {
+          return '';
+        }
+      }).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+  
+  function getGallerySort() {
+    return window.SillyTavern?.getContext?.()?.extensionSettings?.gallery?.sort ?? 'dateAsc';
+  }
+  
+  function setGallerySort(sort) {
+    const context = window.SillyTavern?.getContext?.();
+    if (!context?.extensionSettings?.gallery) return;
+    context.extensionSettings.gallery.sort = sort;
+    context.saveSettingsDebounced?.();
+  }
+  
+  function getStoredOrder(folder, fallback = []) {
+    const stored = gpSettings().customOrders?.[folder];
+    const order = Array.isArray(stored) ? stored.filter(item => typeof item === 'string') : [];
+    return applyOrder(order, fallback);
+  }
+  
+  function saveStoredOrder(folder, order) {
+    if (!folder) return;
+    const customOrders = { ...(gpSettings().customOrders || {}), [folder]: [...order] };
+    gpSaveSettings({ customOrders });
+  }
+  
+  function removeFromStoredOrder(folder, filename) {
+    const current = gpSettings().customOrders?.[folder];
+    if (!Array.isArray(current)) return;
+    saveStoredOrder(folder, current.filter(item => item !== filename));
+  }
+  
+  function applyStoredOrder(folder, files) {
+    const order = getStoredOrder(folder, files);
+    const stored = gpSettings().customOrders?.[folder];
+    if (!Array.isArray(stored) || !sameList(stored, order)) {
+      saveStoredOrder(folder, order);
+    }
+    return order;
+  }
+  
+  function applyOrder(order, files) {
+    const available = new Set(files);
+    const result = order.filter((item, index) => available.has(item) && order.indexOf(item) === index);
+    const included = new Set(result);
+    for (const file of files) {
+      if (!included.has(file)) {
+        included.add(file);
+        result.push(file);
+      }
+    }
+    return result;
+  }
+  
+  function sameList(a, b) {
+    return a.length === b.length && a.every((item, index) => item === b[index]);
+  }
+  
+  function reorderFiles(order, dragged, target, placeAfter = false) {
+    const next = [...order];
+    const from = next.indexOf(dragged);
+    if (from < 0 || !next.includes(target) || dragged === target) return next;
+  
+    next.splice(from, 1);
+    let insertAt = next.indexOf(target);
+    if (placeAfter) insertAt += 1;
+    next.splice(insertAt, 0, dragged);
+    return next;
+  }
+  
+  function getRequestHeaders() {
+    const context = window.SillyTavern?.getContext?.();
+    return context?.getRequestHeaders?.() ?? { 'Content-Type': 'application/json' };
+  }
+  
+  function notify(level, message) {
+    const toaster = window.toastr?.[level];
+    if (typeof toaster === 'function') toaster(message, 'GalleryPlus');
+    else console[level === 'error' ? 'error' : 'info'](`[GalleryPlus] ${message}`);
+  }
+
   function applyGalleryTitle() {
     const t = document.querySelector('#gallery .dragTitle span');
     if (t && t.textContent && !/Image GalleryPlus/.test(t.textContent)) {
       t.textContent = 'Image GalleryPlus';
     }
   }
-
+  
   function initObservers() {
-    const galleryObserver = new MutationObserver(applyGalleryTitle);
+    installCustomOrderFetchHook();
+  
+    const galleryObserver = new MutationObserver((mutations) => {
+      applyGalleryTitle();
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (!(node instanceof HTMLElement)) continue;
+          if (node.matches?.('#gallery')) wireGallery(node);
+          node.querySelectorAll?.('#gallery')?.forEach(wireGallery);
+        }
+      }
+    });
     galleryObserver.observe(document.body, { childList: true, subtree: true });
     applyGalleryTitle();
-
+    document.querySelectorAll('#gallery').forEach(wireGallery);
+  
     const viewerObserver = new MutationObserver((muts) => {
       for (const m of muts) {
         for (const n of m.addedNodes) {
@@ -766,6 +1111,5 @@
   }
 
   initObservers();
-
 })();
 

@@ -12,6 +12,7 @@ const DEFAULTS = {
   webpOnly: false,
   slideshowSpeedSec: 3,
   slideshowTransition: 'fade',
+  customOrders: {},
 };
 
 function ctx() {
@@ -53,8 +54,10 @@ export function gpSaveSettings(partial = {}) {
   const c = ctx();
   if (c?.extensionSettings) {
     c.extensionSettings[EXT_ID] = { ..._settingsBag(), ...partial };
+    c.saveSettingsDebounced?.();
   } else {
     const merged = { ..._settingsBag(), ...partial };
     localStorage.setItem('GP_SETTINGS', JSON.stringify(merged));
   }
 }
+
