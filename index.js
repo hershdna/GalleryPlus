@@ -610,8 +610,31 @@
   }
 
   function currentGalleryList() {
-    const thumbs = document.querySelectorAll('#dragGallery img.nGY2GThumbnailImg, #dragGallery .nGY2GThumbnailImage.nGY2TnImg');
     const out = [];
+    const jq = window.jQuery || window.$;
+  
+    if (typeof jq === 'function') {
+      const gallery = jq('#dragGallery');
+      if (gallery.length && typeof gallery.nanogallery2 === 'function') {
+        try {
+          const items = gallery.nanogallery2('data')?.items;
+          if (Array.isArray(items)) {
+            items.forEach(item => {
+              const src = typeof item?.responsiveURL === 'function'
+                ? item.responsiveURL()
+                : item?.src;
+              if (src) out.push(src);
+            });
+          }
+        } catch {
+          // Fall back to visible thumbnails for older nanogallery2 versions.
+        }
+      }
+    }
+  
+    if (out.length) return [...new Set(out)];
+  
+    const thumbs = document.querySelectorAll('#dragGallery img.nGY2GThumbnailImg, #dragGallery .nGY2GThumbnailImage.nGY2TnImg');
     thumbs.forEach(t => {
       if (t instanceof HTMLImageElement && t.src) out.push(t.src);
       else if (t instanceof HTMLElement) {
