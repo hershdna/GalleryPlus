@@ -7,6 +7,7 @@ custom image ordering, and safe gallery organization.
 
 - Slideshow playback across the complete gallery, including paginated images
 - Previous/next, play/pause, fullscreen, speed, Cut/Fade, and randomize controls
+- Full-image window fitting with black letterboxing instead of cropping
 - Slideshow playback and live image synchronization after the gallery closes
 - Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
 - A **Custom** gallery sort mode with drag-and-drop thumbnail reordering
