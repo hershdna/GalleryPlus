@@ -11,7 +11,7 @@ const DEFAULTS = {
   showCaptions: true,
   webpOnly: false,
   slideshowSpeedSec: 3,
-  slideshowTransition: 'crossfade',
+  slideshowTransition: 'fade',
 };
 
 function ctx() {

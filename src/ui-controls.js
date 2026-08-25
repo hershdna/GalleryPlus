@@ -132,10 +132,8 @@ function injectLeftControls(root, pcBar) {
   speedValue.setAttribute('aria-live', 'polite');
 
   function refreshSpeedDisplay() {
-    const trans = root.dataset.gpTransition || gpSettings().slideshowTransition || 'crossfade';
     const delay = parseFloat(speed.value || '3');
     speedValue.textContent = `${delay.toFixed(1)}s`;
-    if (trans === 'spiral' && delay < 3) speed.classList.add('gp-warn'); else speed.classList.remove('gp-warn');
   }
   speed.addEventListener('input', refreshSpeedDisplay);
   speed.addEventListener('change', () => {
@@ -155,23 +153,25 @@ function injectLeftControls(root, pcBar) {
   const sel = document.createElement('select');
   sel.className = 'gp-transition';
   sel.title = 'Transition style';
+  const savedTransition = gpSettings().slideshowTransition;
+  const initialTransition = savedTransition === 'cut' ? 'cut' : 'fade';
+  if (savedTransition !== initialTransition) {
+    gpSaveSettings({ slideshowTransition: initialTransition });
+  }
   [
-    ['crossfade', '😶‍🌫️'],
-    ['spiral',    '😵‍🨡'],
-    ['pushX',     '➡️'],
-    ['pushY',     '⬇️'],
+    ['cut', 'Cut'],
+    ['fade', 'Fade'],
   ].forEach(([v, lbl]) => {
     const o = document.createElement('option');
     o.value = v; o.textContent = lbl;
-    if ((gpSettings().slideshowTransition || 'crossfade') === v) o.selected = true;
+    if (initialTransition === v) o.selected = true;
     sel.appendChild(o);
   });
-  root.dataset.gpTransition = gpSettings().slideshowTransition || 'crossfade';
+  root.dataset.gpTransition = initialTransition;
   sel.addEventListener('change', () => {
     const v = sel.value;
     root.dataset.gpTransition = v;
     gpSaveSettings({ slideshowTransition: v });
-    refreshSpeedDisplay();
   });
 
   left.appendChild(saveBtn);
