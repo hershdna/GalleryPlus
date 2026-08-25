@@ -309,7 +309,7 @@
     } else {
       left.innerHTML = '';
     }
-  
+
     // 💾 save default size/pos
     const saveBtn = document.createElement('button');
     saveBtn.className = 'gp-btn gp-save';
@@ -321,7 +321,7 @@
     saveIcon.textContent = '💾';
     saveBtn.appendChild(saveIcon);
     saveBtn.addEventListener('click', () => saveDefaultRect(root));
-  
+
     // 🔍 toggle hover zoom
     const zoomBtn = document.createElement('button');
     zoomBtn.className = 'gp-btn gp-zoom';
@@ -338,14 +338,14 @@
       gpSaveSettings({ hoverZoom: ns });
       zoomBtn.classList.toggle('active', ns);
     });
-  
+
     function stepSlideshow(direction) {
       if (direction < 0) goPrev(root); else goNext(root);
       if (root.dataset.gpPlaying === '1') {
         scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
       }
     }
-  
+
     // ⏮️ previous image
     const prevBtn = document.createElement('button');
     prevBtn.className = 'gp-btn gp-prev';
@@ -357,7 +357,7 @@
     prevIcon.textContent = '⏮️';
     prevBtn.appendChild(prevIcon);
     prevBtn.addEventListener('click', () => stepSlideshow(-1));
-  
+
     // ⏯️ start/pause slideshow
     const playBtn = document.createElement('button');
     playBtn.className = 'gp-btn gp-play';
@@ -372,7 +372,7 @@
       if (root.dataset.gpPlaying === '1') stopSlideshow(root);
       else startSlideshow(root);
     });
-  
+
     // ⏭️ next image
     const nextBtn = document.createElement('button');
     nextBtn.className = 'gp-btn gp-next';
@@ -384,7 +384,7 @@
     nextIcon.textContent = '⏭️';
     nextBtn.appendChild(nextIcon);
     nextBtn.addEventListener('click', () => stepSlideshow(1));
-  
+
     // ⛶ fullscreen
     const fsBtn = document.createElement('button');
     fsBtn.className = 'gp-btn gp-fs';
@@ -396,7 +396,7 @@
     fsIcon.textContent = '⛶';
     fsBtn.appendChild(fsIcon);
     fsBtn.addEventListener('click', () => toggleFullscreen(root));
-  
+
     // speed slider
     const speedWrap = document.createElement('div');
     speedWrap.className = 'gp-speed-wrap';
@@ -409,12 +409,12 @@
     speed.value = String(gpSettings().slideshowSpeedSec ?? 3);
     speed.title = 'Slideshow delay (seconds)';
     speed.setAttribute('aria-label', speed.title);
-  
+
     const speedValue = document.createElement('output');
     speedValue.className = 'gp-speed-value';
     speedValue.title = 'Time between images';
     speedValue.setAttribute('aria-live', 'polite');
-  
+
     function refreshSpeedDisplay() {
       const trans = root.dataset.gpTransition || gpSettings().slideshowTransition || 'crossfade';
       const delay = parseFloat(speed.value || '3');
@@ -434,7 +434,7 @@
     refreshSpeedDisplay();
     speedWrap.appendChild(speed);
     speedWrap.appendChild(speedValue);
-  
+
     // transition select
     const sel = document.createElement('select');
     sel.className = 'gp-transition';
@@ -457,7 +457,7 @@
       gpSaveSettings({ slideshowTransition: v });
       refreshSpeedDisplay();
     });
-  
+
     left.appendChild(saveBtn);
     left.appendChild(zoomBtn);
     left.appendChild(prevBtn);
@@ -654,7 +654,7 @@
   function currentGalleryList() {
     const out = [];
     const jq = window.jQuery || window.$;
-  
+
     if (typeof jq === 'function') {
       const gallery = jq('#dragGallery');
       if (gallery.length && typeof gallery.nanogallery2 === 'function') {
@@ -673,9 +673,9 @@
         }
       }
     }
-  
+
     if (out.length) return [...new Set(out)];
-  
+
     const thumbs = document.querySelectorAll('#dragGallery img.nGY2GThumbnailImg, #dragGallery .nGY2GThumbnailImage.nGY2TnImg');
     thumbs.forEach(t => {
       if (t instanceof HTMLImageElement && t.src) out.push(t.src);
