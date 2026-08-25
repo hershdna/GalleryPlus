@@ -206,7 +206,7 @@
     // ⏮️ previous image
     const prevBtn = document.createElement('button');
     prevBtn.className = 'gp-btn gp-prev';
-    const prevTip = 'Previous image';
+    const prevTip = 'Previous image (Ctrl+Left Arrow)';
     prevBtn.title = prevTip;
     prevBtn.setAttribute('aria-label', prevTip);
     const prevIcon = document.createElement('span');
@@ -218,7 +218,7 @@
     // ⏯️ start/pause slideshow
     const playBtn = document.createElement('button');
     playBtn.className = 'gp-btn gp-play';
-    const playTip = 'Start / pause slideshow';
+    const playTip = 'Start / pause slideshow (Ctrl+Space)';
     playBtn.title = playTip;
     playBtn.setAttribute('aria-label', playTip);
     const playIcon = document.createElement('span');
@@ -233,7 +233,7 @@
     // ⏭️ next image
     const nextBtn = document.createElement('button');
     nextBtn.className = 'gp-btn gp-next';
-    const nextTip = 'Next image';
+    const nextTip = 'Next image (Ctrl+Right Arrow)';
     nextBtn.title = nextTip;
     nextBtn.setAttribute('aria-label', nextTip);
     const nextIcon = document.createElement('span');
@@ -241,6 +241,18 @@
     nextIcon.textContent = '⏭️';
     nextBtn.appendChild(nextIcon);
     nextBtn.addEventListener('click', () => stepSlideshow(1));
+
+    // 🔀 randomize slideshow order
+    const randomBtn = document.createElement('button');
+    randomBtn.className = 'gp-btn gp-random';
+    const randomTip = 'Randomize slideshow order';
+    randomBtn.title = randomTip;
+    randomBtn.setAttribute('aria-label', randomTip);
+    const randomIcon = document.createElement('span');
+    randomIcon.setAttribute('aria-hidden', 'true');
+    randomIcon.textContent = '🔀';
+    randomBtn.appendChild(randomIcon);
+    randomBtn.addEventListener('click', () => randomizeGalleryOrder(root));
 
     // ⛶ fullscreen
     const fsBtn = document.createElement('button');
@@ -320,6 +332,7 @@
     left.appendChild(prevBtn);
     left.appendChild(playBtn);
     left.appendChild(nextBtn);
+    left.appendChild(randomBtn);
     left.appendChild(fsBtn);
     left.appendChild(speedWrap);
     left.appendChild(sel);
@@ -440,10 +453,15 @@
         document.removeEventListener('keydown', handler);
         return;
       }
+      if (e.key === 'Escape') {
+        root.querySelector('.dragClose')?.click();
+        return;
+      }
+      if (!e.ctrlKey || e.repeat) return;
+
       if (e.key === 'ArrowRight') { e.preventDefault(); goNext(root); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(root); }
       else if (e.key === ' ') { e.preventDefault(); root.dataset.gpPlaying === '1' ? stopSlideshow(root) : startSlideshow(root); }
-      else if (e.key === 'Escape') { root.querySelector('.dragClose')?.click(); }
     }
     document.addEventListener('keydown', handler);
   }
@@ -508,6 +526,26 @@
     preload(list[(prevIdx - 1 + list.length) % list.length]);
   }
 
+  function randomizeGalleryOrder(root) {
+    const list = [...currentGalleryList(root)];
+    if (list.length < 2) return;
+
+    const img = root.querySelector('img');
+    const currentIndex = img ? indexInList(list, img.src) : -1;
+    const current = currentIndex >= 0 ? list.splice(currentIndex, 1)[0] : null;
+    shuffleInPlace(list);
+    root._gpGalleryList = current ? [current, ...list] : list;
+    root.dataset.gpRandomized = '1';
+  }
+
+  function shuffleInPlace(items) {
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [items[i], items[j]] = [items[j], items[i]];
+    }
+    return items;
+  }
+
   function initializeGalleryList(root) {
     const galleryList = readGalleryDataList();
     root._gpGalleryList = galleryList ?? readVisibleGalleryList();
@@ -547,9 +585,25 @@
     if (updated === null) return;
 
     const current = Array.isArray(root._gpGalleryList) ? root._gpGalleryList : [];
-    if (!sameGalleryList(current, updated)) {
-      root._gpGalleryList = updated;
+    const next = root.dataset.gpRandomized === '1'
+      ? mergeRandomizedGalleryList(current, updated)
+      : updated;
+    if (!sameGalleryList(current, next)) {
+      root._gpGalleryList = next;
     }
+  }
+
+  function mergeRandomizedGalleryList(current, updated) {
+    const available = new Set(updated);
+    const merged = current.filter(item => available.has(item));
+    const included = new Set(merged);
+    const added = shuffleInPlace(updated.filter(item => !included.has(item)));
+
+    for (const item of added) {
+      const insertAt = Math.floor(Math.random() * (merged.length + 1));
+      merged.splice(insertAt, 0, item);
+    }
+    return merged;
   }
 
   async function fetchGalleryList(root) {
