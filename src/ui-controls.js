@@ -28,15 +28,25 @@ function injectLeftControls(root, pcBar) {
   // 💾 save default size/pos
   const saveBtn = document.createElement('button');
   saveBtn.className = 'gp-btn gp-save';
-  saveBtn.title = 'Save as default size and location';
-  saveBtn.textContent = '💾';
+  const saveTip = 'Save as default size and location';
+  saveBtn.title = saveTip;
+  saveBtn.setAttribute('aria-label', saveTip);
+  const saveIcon = document.createElement('span');
+  saveIcon.setAttribute('aria-hidden', 'true');
+  saveIcon.textContent = '💾';
+  saveBtn.appendChild(saveIcon);
   saveBtn.addEventListener('click', () => saveDefaultRect(root));
 
   // 🔍 toggle hover zoom
   const zoomBtn = document.createElement('button');
   zoomBtn.className = 'gp-btn gp-zoom';
-  zoomBtn.title = 'Toggle hover zoom (off = scroll zoom + pan)';
-  zoomBtn.textContent = '🔍';
+  const zoomTip = 'Toggle hover zoom (off = scroll zoom + pan)';
+  zoomBtn.title = zoomTip;
+  zoomBtn.setAttribute('aria-label', zoomTip);
+  const zoomIcon = document.createElement('span');
+  zoomIcon.setAttribute('aria-hidden', 'true');
+  zoomIcon.textContent = '🔍';
+  zoomBtn.appendChild(zoomIcon);
   zoomBtn.classList.toggle('active', !!gpSettings().hoverZoom);
   zoomBtn.addEventListener('click', () => {
     const ns = !gpSettings().hoverZoom;
@@ -44,21 +54,62 @@ function injectLeftControls(root, pcBar) {
     zoomBtn.classList.toggle('active', ns);
   });
 
+  function stepSlideshow(direction) {
+    if (direction < 0) goPrev(root); else goNext(root);
+    if (root.dataset.gpPlaying === '1') {
+      scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
+    }
+  }
+
+  // ⏮️ previous image
+  const prevBtn = document.createElement('button');
+  prevBtn.className = 'gp-btn gp-prev';
+  const prevTip = 'Previous image';
+  prevBtn.title = prevTip;
+  prevBtn.setAttribute('aria-label', prevTip);
+  const prevIcon = document.createElement('span');
+  prevIcon.setAttribute('aria-hidden', 'true');
+  prevIcon.textContent = '⏮️';
+  prevBtn.appendChild(prevIcon);
+  prevBtn.addEventListener('click', () => stepSlideshow(-1));
+
   // ⏯️ start/pause slideshow
   const playBtn = document.createElement('button');
   playBtn.className = 'gp-btn gp-play';
-  playBtn.title = 'Start / pause slideshow';
-  playBtn.textContent = '⏯️';
+  const playTip = 'Start / pause slideshow';
+  playBtn.title = playTip;
+  playBtn.setAttribute('aria-label', playTip);
+  const playIcon = document.createElement('span');
+  playIcon.setAttribute('aria-hidden', 'true');
+  playIcon.textContent = '⏯️';
+  playBtn.appendChild(playIcon);
   playBtn.addEventListener('click', () => {
     if (root.dataset.gpPlaying === '1') stopSlideshow(root);
     else startSlideshow(root);
   });
 
-  // ⭘ fullscreen
+  // ⏭️ next image
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'gp-btn gp-next';
+  const nextTip = 'Next image';
+  nextBtn.title = nextTip;
+  nextBtn.setAttribute('aria-label', nextTip);
+  const nextIcon = document.createElement('span');
+  nextIcon.setAttribute('aria-hidden', 'true');
+  nextIcon.textContent = '⏭️';
+  nextBtn.appendChild(nextIcon);
+  nextBtn.addEventListener('click', () => stepSlideshow(1));
+
+  // ⛶ fullscreen
   const fsBtn = document.createElement('button');
   fsBtn.className = 'gp-btn gp-fs';
-  fsBtn.title = 'Fullscreen slideshow';
-  fsBtn.textContent = '⭘';
+  const fsTip = 'Fullscreen slideshow';
+  fsBtn.title = fsTip;
+  fsBtn.setAttribute('aria-label', fsTip);
+  const fsIcon = document.createElement('span');
+  fsIcon.setAttribute('aria-hidden', 'true');
+  fsIcon.textContent = '⛶';
+  fsBtn.appendChild(fsIcon);
   fsBtn.addEventListener('click', () => toggleFullscreen(root));
 
   // speed slider
@@ -72,22 +123,32 @@ function injectLeftControls(root, pcBar) {
   speed.className = 'gp-speed';
   speed.value = String(gpSettings().slideshowSpeedSec ?? 3);
   speed.title = 'Slideshow delay (seconds)';
-  function refreshSpeedWarn() {
+  speed.setAttribute('aria-label', speed.title);
+
+  const speedValue = document.createElement('output');
+  speedValue.className = 'gp-speed-value';
+  speedValue.title = 'Time between images';
+  speedValue.setAttribute('aria-live', 'polite');
+
+  function refreshSpeedDisplay() {
     const trans = root.dataset.gpTransition || gpSettings().slideshowTransition || 'crossfade';
     const delay = parseFloat(speed.value || '3');
+    speedValue.textContent = `${delay.toFixed(1)}s`;
     if (trans === 'spiral' && delay < 3) speed.classList.add('gp-warn'); else speed.classList.remove('gp-warn');
   }
-  speed.addEventListener('input', refreshSpeedWarn);
+  speed.addEventListener('input', refreshSpeedDisplay);
   speed.addEventListener('change', () => {
     let v = parseFloat(speed.value);
     if (!Number.isFinite(v) || v < 0.1) v = 0.1;
     if (v > 10) v = 10;
+    speed.value = String(v);
     gpSaveSettings({ slideshowSpeedSec: v });
-    refreshSpeedWarn();
+    refreshSpeedDisplay();
     if (root.dataset.gpPlaying === '1') startSlideshow(root);
   });
-  refreshSpeedWarn();
+  refreshSpeedDisplay();
   speedWrap.appendChild(speed);
+  speedWrap.appendChild(speedValue);
 
   // transition select
   const sel = document.createElement('select');
@@ -109,17 +170,18 @@ function injectLeftControls(root, pcBar) {
     const v = sel.value;
     root.dataset.gpTransition = v;
     gpSaveSettings({ slideshowTransition: v });
-    refreshSpeedWarn();
+    refreshSpeedDisplay();
   });
 
   left.appendChild(saveBtn);
   left.appendChild(zoomBtn);
+  left.appendChild(prevBtn);
   left.appendChild(playBtn);
+  left.appendChild(nextBtn);
   left.appendChild(fsBtn);
   left.appendChild(speedWrap);
   left.appendChild(sel);
 }
-
 function saveDefaultRect(root) {
   const st = root.style;
   const rect = {
