@@ -30,6 +30,10 @@ require the included opt-in server plugin:
 2. Set `enableServerPlugins: true` in SillyTavern's `config.yaml`.
 3. Restart SillyTavern.
 
+After a GalleryPlus update, also replace the installed server plugin's
+`index.js` and `package.json`, then restart SillyTavern. Manually copied server
+plugins are not updated by the frontend extension updater.
+
 The server plugin validates the gallery folder and filename, creates the
 `deprecated` directory when needed, and moves the file. If a filename already
 exists there, it adds a numeric suffix instead of overwriting it.

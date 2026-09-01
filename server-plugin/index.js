@@ -1,6 +1,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { version } = require('./package.json');
+
+const CAPABILITIES = ['archive', 'open-folder'];
 
 function isSinglePathSegment(value) {
   return typeof value === 'string'
@@ -36,7 +39,7 @@ function resolveGalleryDirectory(imagesRoot, folder) {
 
 async function init(router) {
   router.get('/health', (_request, response) => {
-    response.json({ ok: true });
+    response.json({ ok: true, version, capabilities: CAPABILITIES });
   });
 
   router.post('/archive', async (request, response) => {
@@ -140,5 +143,6 @@ module.exports = {
     description: 'Organizes gallery images and opens gallery source folders.',
   },
   resolveGalleryDirectory,
+  CAPABILITIES,
 };
 

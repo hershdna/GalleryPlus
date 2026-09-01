@@ -3,6 +3,7 @@ import { gpSettings, gpSaveSettings } from './settings.js';
 const CUSTOM_SORT = 'custom';
 const ARCHIVE_ENDPOINT = '/api/plugins/galleryplus/archive';
 const OPEN_FOLDER_ENDPOINT = '/api/plugins/galleryplus/open-folder';
+const SERVER_HEALTH_ENDPOINT = '/api/plugins/galleryplus/health';
 let archiveModeActive = false;
 let fetchHookInstalled = false;
 
@@ -87,10 +88,11 @@ function installOpenFolderControl(root) {
         body: JSON.stringify({ folder }),
       });
       if (!response.ok) {
-        const message = response.status === 404
-          ? 'GalleryPlus server plugin is not installed. See the GalleryPlus README.'
-          : await response.text();
-        throw new Error(message || `Could not open the folder (status ${response.status}).`);
+        throw new Error(await getServerError(
+          response,
+          'open-folder',
+          `Could not open the folder (status ${response.status}).`,
+        ));
       }
       notify('success', `Opened the "${folder}" source folder.`);
     } catch (error) {
@@ -187,10 +189,11 @@ function installArchiveControl(root, gallery, sortSelect) {
         body: JSON.stringify({ folder, filename }),
       });
       if (!response.ok) {
-        const message = response.status === 404
-          ? 'GalleryPlus server plugin is not installed. See the GalleryPlus README.'
-          : await response.text();
-        throw new Error(message || `Archive failed with status ${response.status}`);
+        throw new Error(await getServerError(
+          response,
+          'archive',
+          `Archive failed with status ${response.status}.`,
+        ));
       }
 
       removeFromStoredOrder(folder, filename);
@@ -379,6 +382,33 @@ export function reorderFiles(order, dragged, target, placeAfter = false) {
 function getRequestHeaders() {
   const context = window.SillyTavern?.getContext?.();
   return context?.getRequestHeaders?.() ?? { 'Content-Type': 'application/json' };
+}
+
+async function getServerError(response, capability, fallback) {
+  const message = (await response.text()).trim();
+  const routeMissing = response.status === 404
+    && (!message || /Cannot\s+(?:GET|POST)\s+\/api\/plugins\/galleryplus\//i.test(message));
+
+  if (!routeMissing) return message || fallback;
+
+  try {
+    const healthResponse = await fetch(SERVER_HEALTH_ENDPOINT, {
+      method: 'GET',
+      headers: getRequestHeaders(),
+    });
+    if (healthResponse.ok) {
+      const health = await healthResponse.json().catch(() => ({}));
+      const capabilities = Array.isArray(health?.capabilities) ? health.capabilities : [];
+      if (!capabilities.includes(capability)) {
+        return 'GalleryPlus server plugin is installed but out of date. Update it and restart SillyTavern.';
+      }
+      return fallback;
+    }
+  } catch {
+    // The health probe is best-effort; use the actionable fallback below.
+  }
+
+  return 'GalleryPlus server plugin is not loaded. Enable server plugins, install GalleryPlus under SillyTavern/plugins, and restart SillyTavern.';
 }
 
 function notify(level, message) {
