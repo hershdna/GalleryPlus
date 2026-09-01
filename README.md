@@ -15,24 +15,29 @@ custom image ordering, and safe gallery organization.
 - A gallery control that opens the current source folder in Windows Explorer
 - Scroll-wheel or hover zoom and click-and-drag panning
 
-## Frontend installation
+## Recommended combined installation
 
-Install this repository as a SillyTavern third-party extension, or copy it into
-SillyTavern's third-party extensions directory.
+Install the complete GalleryPlus repository under SillyTavern's `plugins`
+directory:
 
-## Required server plugin for file organization
-
-Custom ordering works in the frontend alone. Moving removed images into the
-nested `deprecated` folder and opening source folders in Windows Explorer
-require the included opt-in server plugin:
-
-1. Copy `server-plugin` to `SillyTavern/plugins/galleryplus`.
+1. Clone or copy this repository to `SillyTavern/plugins/GalleryPlus`.
 2. Set `enableServerPlugins: true` in SillyTavern's `config.yaml`.
 3. Restart SillyTavern.
 
-After a GalleryPlus update, also replace the installed server plugin's
-`index.js` and `package.json`, then restart SillyTavern. Manually copied server
-plugins are not updated by the frontend extension updater.
+On startup, the server plugin synchronizes the bundled `manifest.json`,
+`index.js`, `style.css`, and `settings.html` into SillyTavern's third-party
+extensions directory. A single repository update therefore updates both halves
+of GalleryPlus after the next restart.
+
+If an older standalone `galleryplus` server-plugin folder is installed, replace
+it with this complete repository instead of keeping both copies. Two copies use
+the same plugin ID and cannot be loaded together.
+
+## Frontend-only installation
+
+The repository can still be installed as a normal SillyTavern third-party
+extension. Slideshows and custom ordering work in frontend-only mode, but safe
+removal and opening Windows Explorer require the combined installation above.
 
 The server plugin validates the gallery folder and filename, creates the
 `deprecated` directory when needed, and moves the file. If a filename already

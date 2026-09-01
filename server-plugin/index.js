@@ -4,6 +4,56 @@ const { spawn } = require('node:child_process');
 const { version } = require('./package.json');
 
 const CAPABILITIES = ['archive', 'open-folder'];
+const FRONTEND_FILES = ['manifest.json', 'index.js', 'style.css', 'settings.html'];
+const EXTENSION_HOME_PAGE = 'https://github.com/theFisher86/GalleryPlus';
+
+async function findFrontendTarget(extensionsRoot) {
+  const defaultTarget = path.join(extensionsRoot, 'GalleryPlus');
+  const entries = await fs.promises.readdir(extensionsRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const candidate = path.join(extensionsRoot, entry.name);
+    const manifestPath = path.join(candidate, 'manifest.json');
+    try {
+      const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+      if (manifest?.display_name === 'GalleryPlus'
+        || String(manifest?.homePage || '').replace(/\/$/, '') === EXTENSION_HOME_PAGE) {
+        return candidate;
+      }
+    } catch {
+      // Ignore unrelated or malformed extension manifests.
+    }
+  }
+  return defaultTarget;
+}
+
+async function syncFrontendFiles(sourceRoot, sillyTavernRoot) {
+  const sources = FRONTEND_FILES.map(file => path.join(sourceRoot, file));
+  const sourceStats = await Promise.all(sources.map(source => fs.promises.stat(source).catch(() => null)));
+  if (sourceStats.some(stat => !stat?.isFile())) return null;
+
+  const extensionsRoot = path.join(
+    sillyTavernRoot,
+    'public',
+    'scripts',
+    'extensions',
+    'third-party',
+  );
+  await fs.promises.mkdir(extensionsRoot, { recursive: true });
+  const target = await findFrontendTarget(extensionsRoot);
+  await fs.promises.mkdir(target, { recursive: true });
+  await Promise.all(FRONTEND_FILES.map(file => (
+    fs.promises.copyFile(path.join(sourceRoot, file), path.join(target, file))
+  )));
+  return target;
+}
+
+async function syncBundledFrontend() {
+  const sourceRoot = path.resolve(__dirname, '..');
+  const pluginsRoot = path.dirname(sourceRoot);
+  if (path.basename(pluginsRoot).toLowerCase() !== 'plugins') return null;
+  return syncFrontendFiles(sourceRoot, path.dirname(pluginsRoot));
+}
 
 function isSinglePathSegment(value) {
   return typeof value === 'string'
@@ -38,6 +88,15 @@ function resolveGalleryDirectory(imagesRoot, folder) {
 }
 
 async function init(router) {
+  try {
+    const frontendTarget = await syncBundledFrontend();
+    if (frontendTarget) {
+      console.log(`[GalleryPlus] Frontend synchronized to ${frontendTarget}`);
+    }
+  } catch (error) {
+    console.error('[GalleryPlus] Failed to synchronize bundled frontend', error);
+  }
+
   router.get('/health', (_request, response) => {
     response.json({ ok: true, version, capabilities: CAPABILITIES });
   });
@@ -144,5 +203,7 @@ module.exports = {
   },
   resolveGalleryDirectory,
   CAPABILITIES,
+  FRONTEND_FILES,
+  syncFrontendFiles,
 };
 
