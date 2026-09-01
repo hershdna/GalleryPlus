@@ -744,6 +744,7 @@
 
   const CUSTOM_SORT = 'custom';
   const ARCHIVE_ENDPOINT = '/api/plugins/galleryplus/archive';
+  const OPEN_FOLDER_ENDPOINT = '/api/plugins/galleryplus/open-folder';
   let archiveModeActive = false;
   let fetchHookInstalled = false;
   
@@ -792,11 +793,66 @@
   
     root.dataset.gpGalleryWired = '1';
     ensureCustomSortOption(sortSelect);
+    installOpenFolderControl(root);
     installArchiveControl(root, gallery, sortSelect);
     installReordering(root, gallery, sortSelect);
     updateCustomOrderHint(root, sortSelect);
   
     sortSelect.addEventListener('change', () => updateCustomOrderHint(root, sortSelect));
+  }
+  
+  function installOpenFolderControl(root) {
+    const folderInput = root.querySelector('.gallery-folder-input');
+    const topBar = folderInput?.parentElement;
+    if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-open-folder')) return;
+  
+    const button = document.createElement('div');
+    button.className = 'right_menu_button fa-solid fa-folder-open fa-fw gp-open-folder';
+    button.title = 'Open source folder in Windows Explorer';
+    button.setAttribute('role', 'button');
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('tabindex', '0');
+  
+    const openFolder = async () => {
+      if (button.classList.contains('gp-busy')) return;
+      const folder = getGalleryFolder(root);
+      if (!folder) {
+        notify('error', 'Choose a gallery folder first.');
+        return;
+      }
+  
+      button.classList.add('gp-busy');
+      try {
+        const response = await fetch(OPEN_FOLDER_ENDPOINT, {
+          method: 'POST',
+          headers: getRequestHeaders(),
+          body: JSON.stringify({ folder }),
+        });
+        if (!response.ok) {
+          const message = response.status === 404
+            ? 'GalleryPlus server plugin is not installed. See the GalleryPlus README.'
+            : await response.text();
+          throw new Error(message || `Could not open the folder (status ${response.status}).`);
+        }
+        notify('success', `Opened the "${folder}" source folder.`);
+      } catch (error) {
+        console.error('[GalleryPlus] Failed to open gallery source folder', error);
+        notify('error', error?.message || 'Failed to open the gallery source folder.');
+      } finally {
+        button.classList.remove('gp-busy');
+      }
+    };
+  
+    button.addEventListener('click', openFolder);
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openFolder();
+    });
+  
+    const folderAccept = topBar.querySelector('.fa-check');
+    if (folderAccept) folderAccept.insertAdjacentElement('afterend', button);
+    else topBar.appendChild(button);
   }
   
   function ensureCustomSortOption(select) {

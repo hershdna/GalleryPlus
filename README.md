@@ -12,6 +12,7 @@ custom image ordering, and safe gallery organization.
 - Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
 - A **Custom** gallery sort mode with drag-and-drop thumbnail reordering
 - Safe Remove mode that moves files to `<gallery folder>/deprecated`
+- A gallery control that opens the current source folder in Windows Explorer
 - Scroll-wheel or hover zoom and click-and-drag panning
 
 ## Frontend installation
@@ -19,10 +20,11 @@ custom image ordering, and safe gallery organization.
 Install this repository as a SillyTavern third-party extension, or copy it into
 SillyTavern's third-party extensions directory.
 
-## Required server plugin for safe removal
+## Required server plugin for file organization
 
 Custom ordering works in the frontend alone. Moving removed images into the
-nested `deprecated` folder requires the included opt-in server plugin:
+nested `deprecated` folder and opening source folders in Windows Explorer
+require the included opt-in server plugin:
 
 1. Copy `server-plugin` to `SillyTavern/plugins/galleryplus`.
 2. Set `enableServerPlugins: true` in SillyTavern's `config.yaml`.
@@ -31,6 +33,11 @@ nested `deprecated` folder requires the included opt-in server plugin:
 The server plugin validates the gallery folder and filename, creates the
 `deprecated` directory when needed, and moves the file. If a filename already
 exists there, it adds a numeric suffix instead of overwriting it.
+
+## Opening the source folder
+
+Click the folder-open control next to the gallery folder field. GalleryPlus asks
+the server plugin to open that gallery's source directory in Windows Explorer.
 
 ## Using custom order
 

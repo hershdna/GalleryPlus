@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 
 function isSinglePathSegment(value) {
   return typeof value === 'string'
@@ -24,6 +25,15 @@ function uniqueDestination(directory, filename) {
   return candidate;
 }
 
+function resolveGalleryDirectory(imagesRoot, folder) {
+  if (typeof imagesRoot !== 'string' || !isSinglePathSegment(folder)) return null;
+  const resolvedRoot = path.resolve(imagesRoot);
+  const directory = path.resolve(resolvedRoot, folder);
+  const relative = path.relative(resolvedRoot, directory);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  return directory;
+}
+
 async function init(router) {
   router.get('/health', (_request, response) => {
     response.json({ ok: true });
@@ -41,7 +51,10 @@ async function init(router) {
         return response.status(500).send('The user images directory is unavailable.');
       }
 
-      const sourceDirectory = path.resolve(imagesRoot, folder);
+      const sourceDirectory = resolveGalleryDirectory(imagesRoot, folder);
+      if (!sourceDirectory) {
+        return response.status(400).send('Invalid gallery folder.');
+      }
       const source = path.resolve(sourceDirectory, filename);
       const relativeSource = path.relative(sourceDirectory, source);
       if (relativeSource.startsWith('..') || path.isAbsolute(relativeSource)) {
@@ -69,6 +82,47 @@ async function init(router) {
     }
   });
 
+  router.post('/open-folder', async (request, response) => {
+    try {
+      if (process.platform !== 'win32') {
+        return response.status(501).send('Opening the source folder is only supported on Windows.');
+      }
+
+      const imagesRoot = request.user?.directories?.userImages;
+      if (!imagesRoot) {
+        return response.status(500).send('The user images directory is unavailable.');
+      }
+
+      const sourceDirectory = resolveGalleryDirectory(imagesRoot, request.body?.folder);
+      if (!sourceDirectory) {
+        return response.status(400).send('Invalid gallery folder.');
+      }
+
+      const stat = await fs.promises.stat(sourceDirectory).catch(() => null);
+      if (!stat?.isDirectory()) {
+        return response.status(404).send('Gallery folder not found.');
+      }
+
+      await new Promise((resolve, reject) => {
+        const child = spawn('explorer.exe', [sourceDirectory], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: false,
+        });
+        child.once('error', reject);
+        child.once('spawn', () => {
+          child.unref();
+          resolve();
+        });
+      });
+
+      return response.sendStatus(204);
+    } catch (error) {
+      console.error('[GalleryPlus] Failed to open gallery source folder', error);
+      return response.status(500).send('Failed to open the gallery source folder.');
+    }
+  });
+
   console.log('[GalleryPlus] Server plugin loaded');
   return Promise.resolve();
 }
@@ -83,7 +137,8 @@ module.exports = {
   info: {
     id: 'galleryplus',
     name: 'GalleryPlus',
-    description: 'Safely moves removed gallery images into a deprecated folder.',
+    description: 'Organizes gallery images and opens gallery source folders.',
   },
+  resolveGalleryDirectory,
 };
 
