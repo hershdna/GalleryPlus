@@ -36,8 +36,6 @@
 }
 .gp-btn.active {
   box-shadow: 0 0 0 2px var(--SmartThemeUnderlineColor, #7aa2f7) inset;
-}
-.gp-play.active {
   color: var(--SmartThemeUnderlineColor, #7aa2f7);
   background: rgba(122, 162, 247, 0.16);
 }
@@ -113,31 +111,11 @@
   pointer-events: none;
 }
 
-.gp-file-types {
-  position: relative;
-  display: inline-block;
-}
-.gp-file-types > summary {
-  display: inline-block;
-  list-style: none;
-  cursor: pointer;
-}
-.gp-file-types > summary::-webkit-details-marker {
-  display: none;
-}
-.gp-file-types[open] > summary {
+.gp-file-types-button.active {
   box-shadow: 0 0 0 2px var(--SmartThemeUnderlineColor, #7aa2f7) inset;
 }
 .gp-file-types-panel {
-  position: fixed;
-  z-index: 1000;
-  width: min(420px, 85vw);
-  padding: 10px;
-  border: 1px solid var(--SmartThemeBorderColor, #666);
-  border-radius: 8px;
-  background: var(--SmartThemeBlurTintColor, #202020);
-  color: var(--SmartThemeBodyColor, #eee);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 14px;
 }
 .gp-external-sources-button.active {
   box-shadow: 0 0 0 2px var(--SmartThemeUnderlineColor, #7aa2f7) inset;
@@ -150,7 +128,8 @@
   from { opacity: 0.45; }
   to { opacity: 1; }
 }
-.gp-external-sources-window {
+.gp-external-sources-window,
+.gp-file-types-window {
   position: fixed;
   inset: 0;
   box-sizing: border-box;
@@ -166,14 +145,16 @@
   color: var(--SmartThemeBodyColor, #eee);
   box-shadow: 0 12px 38px rgba(0, 0, 0, 0.65);
 }
-.gp-external-sources-window::backdrop {
+.gp-external-sources-window::backdrop,
+.gp-file-types-window::backdrop {
   background: rgba(0, 0, 0, 0.62);
   backdrop-filter: blur(2px);
 }
 .gp-external-sources-panel {
   padding: 14px;
 }
-.gp-external-sources-header {
+.gp-external-sources-header,
+.gp-file-types-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -181,7 +162,8 @@
   margin-bottom: 10px;
   font-size: 1.05em;
 }
-.gp-external-sources-close {
+.gp-external-sources-close,
+.gp-file-types-close {
   appearance: none;
   border: 0;
   border-radius: 6px;
@@ -191,7 +173,8 @@
   line-height: 1;
   cursor: pointer;
 }
-.gp-external-sources-close:hover {
+.gp-external-sources-close:hover,
+.gp-file-types-close:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 .gp-external-sources-label {

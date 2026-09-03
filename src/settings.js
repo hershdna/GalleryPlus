@@ -13,6 +13,7 @@ const DEFAULTS = {
   slideshowSpeedSec: 3,
   slideshowTransition: 'fade',
   videoMuted: false,
+  videoControlsVisible: true,
   videoLoopTimeSec: 10,
   externalSources: {},
   fileTypeFilters: {},

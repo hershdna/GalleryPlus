@@ -120,11 +120,16 @@ function injectLeftControls(root, pcBar) {
   const randomTip = 'Randomize slideshow order';
   randomBtn.title = randomTip;
   randomBtn.setAttribute('aria-label', randomTip);
+  randomBtn.setAttribute('aria-pressed', 'false');
   const randomIcon = document.createElement('span');
   randomIcon.setAttribute('aria-hidden', 'true');
   randomIcon.textContent = '🔀';
   randomBtn.appendChild(randomIcon);
-  randomBtn.addEventListener('click', () => randomizeGalleryOrder(root));
+  randomBtn.addEventListener('click', () => {
+    randomizeGalleryOrder(root);
+    randomBtn.classList.toggle('active', root.dataset.gpRandomized === '1');
+    randomBtn.setAttribute('aria-pressed', String(root.dataset.gpRandomized === '1'));
+  });
 
   // 🔊 globally mute/unmute slideshow videos
   const muteBtn = document.createElement('button');
@@ -151,6 +156,31 @@ function injectLeftControls(root, pcBar) {
     refreshMuteButton();
   });
   refreshMuteButton();
+
+  // Show/hide the browser's native video playback controls.
+  const videoControlsBtn = document.createElement('button');
+  videoControlsBtn.className = 'gp-btn gp-video-controls';
+  const videoControlsIcon = document.createElement('span');
+  videoControlsIcon.setAttribute('aria-hidden', 'true');
+  videoControlsBtn.appendChild(videoControlsIcon);
+
+  function refreshVideoControlsButton() {
+    const visible = gpSettings().videoControlsVisible !== false;
+    videoControlsIcon.textContent = visible ? '🎛️' : '🚫';
+    videoControlsBtn.classList.toggle('active', visible);
+    videoControlsBtn.setAttribute('aria-pressed', String(visible));
+    videoControlsBtn.title = visible ? 'Hide browser video controls' : 'Show browser video controls';
+    videoControlsBtn.setAttribute('aria-label', videoControlsBtn.title);
+  }
+  videoControlsBtn.addEventListener('click', () => {
+    const visible = gpSettings().videoControlsVisible === false;
+    gpSaveSettings({ videoControlsVisible: visible });
+    document.querySelectorAll('.galleryImageDraggable video').forEach((video) => {
+      video.controls = visible;
+    });
+    refreshVideoControlsButton();
+  });
+  refreshVideoControlsButton();
 
   // minimum total video play time; advancement always waits for a loop boundary
   const videoLoopWrap = document.createElement('label');
@@ -267,6 +297,7 @@ function injectLeftControls(root, pcBar) {
   left.appendChild(nextBtn);
   left.appendChild(randomBtn);
   left.appendChild(muteBtn);
+  left.appendChild(videoControlsBtn);
   left.appendChild(fsBtn);
   left.appendChild(speedWrap);
   left.appendChild(videoLoopWrap);
@@ -478,7 +509,7 @@ function detachVideoTracking(root) {
 
 function configureVideo(root, video, resetProgress) {
   clearSlideshowTimer(root);
-  video.controls = true;
+  video.controls = gpSettings().videoControlsVisible !== false;
   video.playsInline = true;
   video.preload = 'auto';
   video.loop = false;
@@ -649,6 +680,7 @@ function initializeGalleryList(root) {
   if (media instanceof HTMLVideoElement) {
     media.muted = !!gpSettings().videoMuted;
     media.loop = false;
+    media.controls = gpSettings().videoControlsVisible !== false;
   }
   try {
     root._gpGalleryBaseUrl = root._gpGalleryFolder

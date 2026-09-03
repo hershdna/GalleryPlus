@@ -16,6 +16,7 @@
     slideshowSpeedSec: 3,
     slideshowTransition: 'fade',
     videoMuted: false,
+    videoControlsVisible: true,
     videoLoopTimeSec: 10,
     externalSources: {},
     fileTypeFilters: {},
@@ -91,7 +92,7 @@
   function configureMedia(media, src) {
     media.src = src;
     if (media instanceof HTMLVideoElement) {
-      media.controls = true;
+      media.controls = gpSettings().videoControlsVisible !== false;
       media.autoplay = false;
       media.playsInline = true;
       media.preload = 'auto';
@@ -316,11 +317,16 @@
     const randomTip = 'Randomize slideshow order';
     randomBtn.title = randomTip;
     randomBtn.setAttribute('aria-label', randomTip);
+    randomBtn.setAttribute('aria-pressed', 'false');
     const randomIcon = document.createElement('span');
     randomIcon.setAttribute('aria-hidden', 'true');
     randomIcon.textContent = '🔀';
     randomBtn.appendChild(randomIcon);
-    randomBtn.addEventListener('click', () => randomizeGalleryOrder(root));
+    randomBtn.addEventListener('click', () => {
+      randomizeGalleryOrder(root);
+      randomBtn.classList.toggle('active', root.dataset.gpRandomized === '1');
+      randomBtn.setAttribute('aria-pressed', String(root.dataset.gpRandomized === '1'));
+    });
   
     // 🔊 globally mute/unmute slideshow videos
     const muteBtn = document.createElement('button');
@@ -347,6 +353,31 @@
       refreshMuteButton();
     });
     refreshMuteButton();
+  
+    // Show/hide the browser's native video playback controls.
+    const videoControlsBtn = document.createElement('button');
+    videoControlsBtn.className = 'gp-btn gp-video-controls';
+    const videoControlsIcon = document.createElement('span');
+    videoControlsIcon.setAttribute('aria-hidden', 'true');
+    videoControlsBtn.appendChild(videoControlsIcon);
+  
+    function refreshVideoControlsButton() {
+      const visible = gpSettings().videoControlsVisible !== false;
+      videoControlsIcon.textContent = visible ? '🎛️' : '🚫';
+      videoControlsBtn.classList.toggle('active', visible);
+      videoControlsBtn.setAttribute('aria-pressed', String(visible));
+      videoControlsBtn.title = visible ? 'Hide browser video controls' : 'Show browser video controls';
+      videoControlsBtn.setAttribute('aria-label', videoControlsBtn.title);
+    }
+    videoControlsBtn.addEventListener('click', () => {
+      const visible = gpSettings().videoControlsVisible === false;
+      gpSaveSettings({ videoControlsVisible: visible });
+      document.querySelectorAll('.galleryImageDraggable video').forEach((video) => {
+        video.controls = visible;
+      });
+      refreshVideoControlsButton();
+    });
+    refreshVideoControlsButton();
   
     // minimum total video play time; advancement always waits for a loop boundary
     const videoLoopWrap = document.createElement('label');
@@ -463,6 +494,7 @@
     left.appendChild(nextBtn);
     left.appendChild(randomBtn);
     left.appendChild(muteBtn);
+    left.appendChild(videoControlsBtn);
     left.appendChild(fsBtn);
     left.appendChild(speedWrap);
     left.appendChild(videoLoopWrap);
@@ -674,7 +706,7 @@
   
   function configureVideo(root, video, resetProgress) {
     clearSlideshowTimer(root);
-    video.controls = true;
+    video.controls = gpSettings().videoControlsVisible !== false;
     video.playsInline = true;
     video.preload = 'auto';
     video.loop = false;
@@ -845,6 +877,7 @@
     if (media instanceof HTMLVideoElement) {
       media.muted = !!gpSettings().videoMuted;
       media.loop = false;
+      media.controls = gpSettings().videoControlsVisible !== false;
     }
     try {
       root._gpGalleryBaseUrl = root._gpGalleryFolder
@@ -1322,8 +1355,10 @@
     };
     window.addEventListener(EXTERNAL_STATUS_EVENT, onExternalMediaStatus);
     const openWindow = () => {
-      const fileTypes = root.querySelector('.gp-file-types[open]');
-      if (fileTypes instanceof HTMLDetailsElement) fileTypes.open = false;
+      document.querySelectorAll('.gp-file-types-window[open]').forEach((fileTypes) => {
+        if (typeof fileTypes.close === 'function') fileTypes.close();
+        else fileTypes.removeAttribute('open');
+      });
       const folder = getGalleryFolder(root);
       textarea.value = getExternalSources(folder).join('\n');
       status.textContent = folder ? '' : 'Choose a gallery folder first.';
@@ -1409,23 +1444,36 @@
   function installFileTypeFilterControl(root, sortSelect) {
     const folderInput = root.querySelector('.gallery-folder-input');
     const topBar = folderInput?.parentElement;
-    if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-file-types')) return;
+    if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-file-types-button')) return;
   
-    const dropdown = document.createElement('details');
-    dropdown.className = 'gp-file-types';
+    const button = document.createElement('div');
+    button.className = 'right_menu_button fa-solid fa-filter fa-fw gp-file-types-button';
+    button.title = 'Choose gallery and slideshow file types';
+    button.setAttribute('role', 'button');
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('tabindex', '0');
   
-    const summary = document.createElement('summary');
-    summary.className = 'right_menu_button fa-solid fa-filter fa-fw gp-file-types-button';
-    summary.title = 'Choose gallery and slideshow file types';
-    summary.setAttribute('aria-label', summary.title);
-    dropdown.appendChild(summary);
+    const dialog = document.createElement('dialog');
+    dialog.className = 'gp-file-types-window';
+    dialog.setAttribute('aria-labelledby', 'gp-file-types-title');
   
     const panel = document.createElement('div');
     panel.className = 'gp-file-types-panel';
   
+    const header = document.createElement('div');
+    header.className = 'gp-file-types-header';
     const heading = document.createElement('strong');
+    heading.id = 'gp-file-types-title';
     heading.textContent = 'Visible file types';
-    panel.appendChild(heading);
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'gp-file-types-close';
+    closeButton.title = 'Close';
+    closeButton.setAttribute('aria-label', 'Close file type filters');
+    closeButton.textContent = '×';
+    header.append(heading, closeButton);
+    panel.appendChild(header);
   
     const groups = document.createElement('div');
     groups.className = 'gp-file-types-groups';
@@ -1471,7 +1519,8 @@
     applyButton.textContent = 'Apply';
     actions.append(allButton, noneButton, applyButton);
     panel.appendChild(actions);
-    dropdown.appendChild(panel);
+    dialog.appendChild(panel);
+    document.body.appendChild(dialog);
   
     const updateStatus = () => {
       const count = [...inputs.values()].filter(input => input.checked).length;
@@ -1481,45 +1530,52 @@
       inputs.forEach(input => { input.checked = checked; });
       updateStatus();
     };
-    const positionPanel = () => {
-      const anchor = summary.getBoundingClientRect();
-      const galleryRect = root.getBoundingClientRect();
-      const margin = 8;
-      const width = Math.min(420, window.innerWidth - margin * 2, Math.max(240, galleryRect.width - margin * 2));
-      panel.style.width = `${width}px`;
-      panel.style.left = `${Math.max(margin, Math.min(
-        galleryRect.left + (galleryRect.width - width) / 2,
-        window.innerWidth - width - margin,
-      ))}px`;
-      panel.style.top = `${anchor.bottom + 6}px`;
-      requestAnimationFrame(() => {
-        const panelRect = panel.getBoundingClientRect();
-        if (panelRect.bottom > window.innerHeight - margin && anchor.top > panelRect.height + margin) {
-          panel.style.top = `${anchor.top - panelRect.height - 6}px`;
-        }
-      });
-    };
-  
-    dropdown.addEventListener('toggle', () => {
-      if (!dropdown.open) {
-        window.removeEventListener('resize', positionPanel);
-        panel.hidden = true;
-        dropdown.appendChild(panel);
-        return;
+    const closeWindow = () => {
+      if (typeof dialog.close === 'function' && dialog.open) dialog.close();
+      else {
+        dialog.removeAttribute('open');
+        button.classList.remove('active');
+        button.setAttribute('aria-expanded', 'false');
       }
-      root.querySelectorAll('.gp-external-sources[open], .gp-file-types[open]').forEach((other) => {
-        if (other !== dropdown) other.open = false;
+    };
+    const openWindow = () => {
+      document.querySelectorAll('.gp-external-sources-window[open]').forEach((externalWindow) => {
+        if (typeof externalWindow.close === 'function') externalWindow.close();
+        else externalWindow.removeAttribute('open');
       });
-      document.body.appendChild(panel);
-      panel.hidden = false;
       const folder = getGalleryFolder(root);
       const enabled = new Set(getEnabledFileTypes(folder));
       inputs.forEach((input, type) => { input.checked = enabled.has(type); });
       updateStatus();
-      positionPanel();
-      window.addEventListener('resize', positionPanel);
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+      button.classList.add('active');
+      button.setAttribute('aria-expanded', 'true');
+      requestAnimationFrame(() => inputs.values().next().value?.focus());
+    };
+  
+    button.addEventListener('click', openWindow);
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openWindow();
     });
-    panel.addEventListener('click', event => event.stopPropagation());
+    closeButton.addEventListener('click', closeWindow);
+    dialog.addEventListener('close', () => {
+      button.classList.remove('active');
+      button.setAttribute('aria-expanded', 'false');
+    });
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      closeWindow();
+    });
+    dialog.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (event.target === dialog) closeWindow();
+    });
+    ['pointerdown', 'mousedown', 'mouseup'].forEach((eventName) => {
+      dialog.addEventListener(eventName, event => event.stopPropagation());
+    });
     inputs.forEach(input => input.addEventListener('change', updateStatus));
     allButton.addEventListener('click', () => setAll(true));
     noneButton.addEventListener('click', () => setAll(false));
@@ -1531,14 +1587,24 @@
       }
       const enabled = SUPPORTED_FILE_TYPES.filter(type => inputs.get(type)?.checked);
       saveEnabledFileTypes(folder, enabled);
-      dropdown.open = false;
+      closeWindow();
       notify('success', `Showing ${enabled.length} of ${SUPPORTED_FILE_TYPES.length} file types.`);
-      refreshGallery(sortSelect);
+      setTimeout(() => {
+        if (sortSelect.isConnected) refreshGallery(sortSelect);
+      }, 0);
     });
   
-    const externalSources = topBar.querySelector('.gp-external-sources');
-    if (externalSources) externalSources.insertAdjacentElement('afterend', dropdown);
-    else topBar.appendChild(dropdown);
+    const externalSources = topBar.querySelector('.gp-external-sources-button');
+    if (externalSources) externalSources.insertAdjacentElement('afterend', button);
+    else topBar.appendChild(button);
+  
+    const lifecycleObserver = new MutationObserver(() => {
+      if (document.body.contains(root)) return;
+      closeWindow();
+      dialog.remove();
+      lifecycleObserver.disconnect();
+    });
+    lifecycleObserver.observe(document.body, { childList: true, subtree: true });
   }
   
   function getEnabledFileTypes(folder) {
@@ -1719,7 +1785,10 @@
       const batch = rawItems.slice(start, start + EXTERNAL_VALIDATION_BATCH_SIZE);
       const results = await Promise.all(batch.map(validateExternalMediaItem));
       batch.forEach((item, index) => {
-        if (results[index]) validPaths.add(item.galleryPath);
+        if (results[index].valid) {
+          item.thumbnail = results[index].thumbnail || '';
+          validPaths.add(item.galleryPath);
+        }
         else {
           validPaths.delete(item.galleryPath);
           failed.push({ source: item.name || item.url, message: 'File could not be displayed or played.' });
@@ -1771,37 +1840,80 @@
   function validateExternalMediaItem(item) {
     const mediaUrl = new URL(String(item.url), location.origin).href;
     const cached = externalValidationCache.get(mediaUrl);
-    if (cached !== undefined) return Promise.resolve(cached);
+    if (cached !== undefined) {
+      return Promise.resolve(typeof cached === 'object' ? cached : { valid: Boolean(cached), thumbnail: '' });
+    }
   
     const isVideo = VIDEO_FILE_TYPES.includes(getFileExtension(item.galleryPath));
     return new Promise((resolve) => {
       const media = isVideo ? document.createElement('video') : new Image();
       let settled = false;
-      const finish = (valid) => {
+      const finish = (result) => {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
         media.onload = null;
         media.onerror = null;
         media.onloadedmetadata = null;
+        media.onloadeddata = null;
+        media.onseeked = null;
         if (media instanceof HTMLVideoElement) {
           media.removeAttribute('src');
           media.load();
         }
-        externalValidationCache.set(mediaUrl, valid);
-        resolve(valid);
+        externalValidationCache.set(mediaUrl, result);
+        resolve(result);
       };
-      const timeout = setTimeout(() => finish(false), EXTERNAL_MEDIA_TIMEOUT_MS);
-      media.onerror = () => finish(false);
+      const timeout = setTimeout(() => finish({ valid: false, thumbnail: '' }), EXTERNAL_MEDIA_TIMEOUT_MS);
+      media.onerror = () => finish({ valid: false, thumbnail: '' });
       if (media instanceof HTMLVideoElement) {
-        media.preload = 'metadata';
+        const captureFrame = () => {
+          if (settled || media.readyState < 2 || media.videoWidth <= 0 || media.videoHeight <= 0) return;
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 240;
+            canvas.height = 150;
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('Canvas is unavailable.');
+            context.fillStyle = '#171717';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            const scale = Math.min(canvas.width / media.videoWidth, canvas.height / media.videoHeight);
+            const width = Math.max(1, Math.round(media.videoWidth * scale));
+            const height = Math.max(1, Math.round(media.videoHeight * scale));
+            context.drawImage(media, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+            finish({ valid: true, thumbnail: canvas.toDataURL('image/jpeg', 0.82) });
+          } catch (error) {
+            console.warn('[GalleryPlus] Could not capture a video thumbnail', error);
+            finish({ valid: true, thumbnail: VIDEO_THUMBNAIL });
+          }
+        };
+        media.preload = 'auto';
         media.muted = true;
-        media.onloadedmetadata = () => finish(Number.isFinite(media.duration) && media.duration > 0);
+        media.playsInline = true;
+        media.onloadedmetadata = () => {
+          if (!Number.isFinite(media.duration) || media.duration <= 0) {
+            finish({ valid: false, thumbnail: '' });
+            return;
+          }
+          const frameTime = Math.min(5, Math.max(0.05, media.duration * 0.1), Math.max(0, media.duration - 0.05));
+          media.onloadeddata = captureFrame;
+          media.onseeked = captureFrame;
+          try {
+            media.currentTime = frameTime;
+            if (media.readyState >= 2) captureFrame();
+          } catch {
+            captureFrame();
+          }
+        };
       } else {
         media.decoding = 'async';
-        media.onload = () => finish(media.naturalWidth > 0 && media.naturalHeight > 0);
+        media.onload = () => finish({
+          valid: media.naturalWidth > 0 && media.naturalHeight > 0,
+          thumbnail: '',
+        });
       }
       media.src = mediaUrl;
+      if (media instanceof HTMLVideoElement) media.load();
     });
   }
   
@@ -1871,7 +1983,7 @@
           const isVideo = VIDEO_FILE_TYPES.includes(extension);
           const id = `gp-external-${Date.now()}-${externalItemSequence++}`;
           const newItem = itemFactory.New(instance, String(item.name || ''), '', id, '0', 'image', '');
-          newItem.thumbSet(isVideo ? VIDEO_THUMBNAIL : mediaUrl, 240, 150);
+          newItem.thumbSet(isVideo ? (item.thumbnail || VIDEO_THUMBNAIL) : mediaUrl, 240, 150);
           newItem.setMediaURL(mediaUrl, isVideo ? 'video' : 'img');
           newItem.addToGOM();
         });
@@ -1909,7 +2021,10 @@
     if (!cached?.items.some(item => item.galleryPath === galleryPath)) return;
     const failedItem = cached.items.find(item => item.galleryPath === galleryPath);
     if (failedItem?.url) {
-      externalValidationCache.set(new URL(String(failedItem.url), location.origin).href, false);
+      externalValidationCache.set(
+        new URL(String(failedItem.url), location.origin).href,
+        { valid: false, thumbnail: '' },
+      );
     }
     const items = cached.items.filter(item => item.galleryPath !== galleryPath);
     const next = {

@@ -7,8 +7,9 @@ custom image ordering, and safe gallery organization.
 
 - Slideshow playback across the complete gallery, including paginated images
 - `.mp4`, `.mov`, and `.webm` gallery items and mixed-media slideshows
-- Previous/next, stateful play/pause, fullscreen, speed, Cut/Fade, and randomize controls
+- Previous/next, stateful play/pause and randomize, fullscreen, speed, and Cut/Fade controls
 - Global video mute and minimum video play-time controls
+- Real video-frame thumbnails and a highlighted slideshow toggle for native video controls
 - Full-image window fitting with black letterboxing instead of cropping
 - Slideshow playback and live image synchronization after the gallery closes
 - Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
@@ -73,8 +74,8 @@ cannot be displayed, and videos without a usable duration, are omitted.
 
 ## Filtering file types
 
-Click the filter control next to the gallery folder field, choose the image and
-video extensions to include, then click **Apply**. The selection is saved for
+Click the filter control next to the gallery folder field to open the centered
+File Types window, choose the image and video extensions to include, then click **Apply**. The selection is saved for
 the current gallery and filters both gallery thumbnails and slideshow playback.
 
 ## Using custom order
