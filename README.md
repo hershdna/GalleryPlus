@@ -6,7 +6,9 @@ custom image ordering, and safe gallery organization.
 ## Features
 
 - Slideshow playback across the complete gallery, including paginated images
+- `.mp4`, `.mov`, and `.webm` gallery items and mixed-media slideshows
 - Previous/next, play/pause, fullscreen, speed, Cut/Fade, and randomize controls
+- Global video mute and minimum video play-time controls
 - Full-image window fitting with black letterboxing instead of cropping
 - Slideshow playback and live image synchronization after the gallery closes
 - Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
@@ -14,6 +16,10 @@ custom image ordering, and safe gallery organization.
 - Safe Remove mode that moves files to `<gallery folder>/deprecated`
 - A gallery control that opens the current source folder in Windows Explorer
 - Scroll-wheel or hover zoom and click-and-drag panning
+
+Short videos repeat until the configured minimum video play time is reached.
+GalleryPlus advances only after the current repetition finishes; videos longer
+than the minimum play once in full.
 
 ## Recommended combined installation
 

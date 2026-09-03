@@ -15,6 +15,8 @@
     webpOnly: false,
     slideshowSpeedSec: 3,
     slideshowTransition: 'fade',
+    videoMuted: false,
+    videoLoopTimeSec: 10,
     customOrders: {},
   };
   
@@ -64,6 +66,18 @@
     }
   }
 
+  const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm'];
+  
+  function isVideoSource(src) {
+    try {
+      const pathname = new URL(String(src), location.href).pathname;
+      const extension = pathname.split('.').pop()?.toLowerCase();
+      return VIDEO_EXTENSIONS.includes(extension);
+    } catch {
+      return VIDEO_EXTENSIONS.some(extension => new RegExp(`\\.${extension}(?:$|[?#])`, 'i').test(String(src)));
+    }
+  }
+  
   function getTransitionMs() {
     const delay = gpSettings().slideshowSpeedSec || 3;
     let ms = Math.round((delay * 1000) / 3);
@@ -72,65 +86,114 @@
     return ms;
   }
   
-  function ensureLayerWrap(baseImg) {
-    let wrap = baseImg.parentElement;
+  function configureMedia(media, src) {
+    media.src = src;
+    if (media instanceof HTMLVideoElement) {
+      media.controls = true;
+      media.autoplay = false;
+      media.playsInline = true;
+      media.preload = 'auto';
+      media.loop = false;
+      media.muted = !!gpSettings().videoMuted;
+    } else if (media instanceof HTMLImageElement) {
+      media.decoding = 'async';
+    }
+    return media;
+  }
+  
+  function createMedia(src) {
+    return configureMedia(
+      isVideoSource(src) ? document.createElement('video') : document.createElement('img'),
+      src,
+    );
+  }
+  
+  function ensureLayerWrap(baseMedia) {
+    let wrap = baseMedia.parentElement;
     if (!wrap || !wrap.classList?.contains('gp-layer-wrap')) {
       const nextWrap = document.createElement('div');
       nextWrap.className = 'gp-layer-wrap';
-      baseImg.replaceWith(nextWrap);
-      nextWrap.appendChild(baseImg);
+      baseMedia.replaceWith(nextWrap);
+      nextWrap.appendChild(baseMedia);
       wrap = nextWrap;
     }
-    baseImg.classList.add('gp-layer', 'base');
+    baseMedia.classList.add('gp-layer', 'base');
     return wrap;
   }
   
-  function beginTransition(root, baseImg) {
+  function settleCurrentMedia(root, fallbackMedia) {
+    const active = root._gpActiveMedia instanceof Element && root._gpActiveMedia.isConnected
+      ? root._gpActiveMedia
+      : fallbackMedia;
+    const wrap = active?.parentElement;
+    if (wrap?.classList?.contains('gp-layer-wrap')) {
+      wrap.querySelectorAll('.gp-layer').forEach((layer) => {
+        if (layer === active) return;
+        if (layer instanceof HTMLVideoElement) layer.pause();
+        layer.remove();
+      });
+      active.classList.remove('next');
+      active.classList.add('base');
+    }
+    return active;
+  }
+  
+  function beginTransition(root, fallbackMedia) {
+    const baseMedia = settleCurrentMedia(root, fallbackMedia);
     const id = (Number(root._gpTransitionId) || 0) + 1;
     root._gpTransitionId = id;
-  
-    const wrap = baseImg.parentElement;
-    if (wrap?.classList?.contains('gp-layer-wrap')) {
-      wrap.querySelectorAll('.gp-layer.next').forEach(layer => layer.remove());
-    }
-  
-    return id;
+    return { id, baseMedia };
   }
   
-  function transitionTo(root, baseImg, nextSrc) {
+  function transitionTo(root, baseMedia, nextSrc) {
     const requested = root.dataset.gpTransition || gpSettings().slideshowTransition;
     if (requested === 'cut') {
-      transitionCut(root, baseImg, nextSrc);
+      return transitionCut(root, baseMedia, nextSrc);
     } else {
-      transitionFade(root, baseImg, nextSrc);
+      return transitionFade(root, baseMedia, nextSrc);
     }
   }
   
-  function transitionCut(root, baseImg, nextSrc) {
-    beginTransition(root, baseImg);
-    baseImg.src = nextSrc;
+  function transitionCut(root, fallbackMedia, nextSrc) {
+    const { baseMedia } = beginTransition(root, fallbackMedia);
+    const wrap = ensureLayerWrap(baseMedia);
+    const next = createMedia(nextSrc);
+    next.className = 'gp-layer base';
+    if (baseMedia instanceof HTMLVideoElement) baseMedia.pause();
+    baseMedia.replaceWith(next);
+    root._gpActiveMedia = next;
+    return next;
   }
   
-  function transitionFade(root, baseImg, nextSrc) {
-    const id = beginTransition(root, baseImg);
-    const wrap = ensureLayerWrap(baseImg);
-    const next = document.createElement('img');
+  function transitionFade(root, fallbackMedia, nextSrc) {
+    const { id, baseMedia } = beginTransition(root, fallbackMedia);
+    const wrap = ensureLayerWrap(baseMedia);
+    const next = createMedia(nextSrc);
     next.className = 'gp-layer next';
-    next.src = nextSrc;
     next.style.opacity = '0';
+    if (baseMedia instanceof HTMLVideoElement) baseMedia.pause();
     wrap.appendChild(next);
+    root._gpActiveMedia = next;
   
     const ms = getTransitionMs();
     next.style.transition = `opacity ${ms}ms ease`;
     requestAnimationFrame(() => { next.style.opacity = '1'; });
     setTimeout(() => {
       if (root._gpTransitionId !== id) {
-        next.remove();
+        if (root._gpActiveMedia !== next) {
+          if (next instanceof HTMLVideoElement) next.pause();
+          next.remove();
+        }
         return;
       }
-      baseImg.src = nextSrc;
-      next.remove();
+      if (baseMedia instanceof HTMLVideoElement) baseMedia.pause();
+      baseMedia.remove();
+      next.classList.remove('next');
+      next.classList.add('base');
+      next.style.opacity = '';
+      next.style.transition = '';
     }, ms + 30);
+    return next;
   }
 
   function wireViewer(root) {
@@ -200,9 +263,6 @@
   
     function stepSlideshow(direction) {
       if (direction < 0) goPrev(root); else goNext(root);
-      if (root.dataset.gpPlaying === '1') {
-        scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
-      }
     }
   
     // ⏮️ previous image
@@ -256,6 +316,65 @@
     randomBtn.appendChild(randomIcon);
     randomBtn.addEventListener('click', () => randomizeGalleryOrder(root));
   
+    // 🔊 globally mute/unmute slideshow videos
+    const muteBtn = document.createElement('button');
+    muteBtn.className = 'gp-btn gp-mute';
+    muteBtn.setAttribute('aria-pressed', String(!!gpSettings().videoMuted));
+    const muteIcon = document.createElement('span');
+    muteIcon.setAttribute('aria-hidden', 'true');
+    muteBtn.appendChild(muteIcon);
+  
+    function refreshMuteButton() {
+      const muted = !!gpSettings().videoMuted;
+      muteIcon.textContent = muted ? '🔇' : '🔊';
+      muteBtn.classList.toggle('active', muted);
+      muteBtn.setAttribute('aria-pressed', String(muted));
+      muteBtn.title = muted ? 'Unmute all slideshow videos' : 'Mute all slideshow videos';
+      muteBtn.setAttribute('aria-label', muteBtn.title);
+    }
+    muteBtn.addEventListener('click', () => {
+      const muted = !gpSettings().videoMuted;
+      gpSaveSettings({ videoMuted: muted });
+      document.querySelectorAll('.galleryImageDraggable video').forEach((video) => {
+        video.muted = muted;
+      });
+      refreshMuteButton();
+    });
+    refreshMuteButton();
+  
+    // minimum total video play time; advancement always waits for a loop boundary
+    const videoLoopWrap = document.createElement('label');
+    videoLoopWrap.className = 'gp-video-loop-wrap';
+    videoLoopWrap.title = 'Minimum video play time; short videos repeat to the next completed loop';
+    const videoLoopLabel = document.createElement('span');
+    videoLoopLabel.textContent = 'Video';
+    const videoLoop = document.createElement('input');
+    videoLoop.type = 'number';
+    videoLoop.min = '0';
+    videoLoop.max = '3600';
+    videoLoop.step = '1';
+    videoLoop.className = 'gp-video-loop';
+    videoLoop.value = String(gpSettings().videoLoopTimeSec ?? 10);
+    videoLoop.setAttribute('aria-label', 'Minimum video play time in seconds');
+    const videoLoopUnit = document.createElement('span');
+    videoLoopUnit.textContent = 's';
+    videoLoop.addEventListener('input', () => {
+      const value = Number(videoLoop.value);
+      if (Number.isFinite(value) && value >= 0 && value <= 3600) {
+        gpSaveSettings({ videoLoopTimeSec: value });
+      }
+    });
+    videoLoop.addEventListener('change', () => {
+      let value = Number(videoLoop.value);
+      if (!Number.isFinite(value) || value < 0) value = 0;
+      if (value > 3600) value = 3600;
+      videoLoop.value = String(value);
+      gpSaveSettings({ videoLoopTimeSec: value });
+    });
+    videoLoopWrap.appendChild(videoLoopLabel);
+    videoLoopWrap.appendChild(videoLoop);
+    videoLoopWrap.appendChild(videoLoopUnit);
+  
     // ⛶ fullscreen
     const fsBtn = document.createElement('button');
     fsBtn.className = 'gp-btn gp-fs';
@@ -298,7 +417,9 @@
       speed.value = String(v);
       gpSaveSettings({ slideshowSpeedSec: v });
       refreshSpeedDisplay();
-      if (root.dataset.gpPlaying === '1') startSlideshow(root);
+      if (root.dataset.gpPlaying === '1' && !(currentMedia(root) instanceof HTMLVideoElement)) {
+        scheduleCurrentMedia(root, false);
+      }
     });
     refreshSpeedDisplay();
     speedWrap.appendChild(speed);
@@ -335,8 +456,10 @@
     left.appendChild(playBtn);
     left.appendChild(nextBtn);
     left.appendChild(randomBtn);
+    left.appendChild(muteBtn);
     left.appendChild(fsBtn);
     left.appendChild(speedWrap);
+    left.appendChild(videoLoopWrap);
     left.appendChild(sel);
   }
   function saveDefaultRect(root) {
@@ -360,9 +483,6 @@
   }
   
   function wireZoomAndPan(root) {
-    const img = root.querySelector('img');
-    if (!img) return;
-  
     let scale = 1;
     let tx = 0, ty = 0;
   
@@ -370,7 +490,14 @@
     let panStartX = 0, panStartY = 0;
     let panBaseX = 0, panBaseY = 0;
   
+    function getImage() {
+      const media = currentMedia(root);
+      return media instanceof HTMLImageElement ? media : null;
+    }
+  
     function applyTransform() {
+      const img = getImage();
+      if (!img) return;
       img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
       img.style.transformOrigin = 'center center';
       img.style.willChange = 'transform';
@@ -378,6 +505,8 @@
   
     function onWheel(e) {
       if (gpSettings().hoverZoom) return;
+      const img = getImage();
+      if (!img) return;
       if (!e.ctrlKey) {
         e.preventDefault();
         const delta = -Math.sign(e.deltaY) * 0.1;
@@ -398,6 +527,8 @@
   
     function onMoveHover(e) {
       if (!gpSettings().hoverZoom) return;
+      const img = getImage();
+      if (!img) return;
       const rect = img.getBoundingClientRect();
       const nx = ((e.clientX - rect.left) / rect.width - 0.5) * -1;
       const ny = ((e.clientY - rect.top) / rect.height - 0.5) * -1;
@@ -417,6 +548,8 @@
       if (gpSettings().hoverZoom) return;
       if (e.button !== 0) return;
       if (scale <= 1.001) return;
+      const img = getImage();
+      if (!img || e.target !== img) return;
       isPanning = true;
       root.classList.add('gp-panning');
       panStartX = e.clientX;
@@ -444,7 +577,7 @@
     root.addEventListener('wheel', onWheel, { passive: false });
     root.addEventListener('mousemove', onMoveHover);
     root.addEventListener('mouseleave', onLeaveHover);
-    img.addEventListener('mousedown', onMouseDown);
+    root.addEventListener('mousedown', onMouseDown);
   
     applyTransform();
   }
@@ -494,46 +627,123 @@
   
   function startSlideshow(root) {
     root.dataset.gpPlaying = '1';
-    scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
+    scheduleCurrentMedia(root, false);
   }
   function stopSlideshow(root) {
     root.dataset.gpPlaying = '0';
-    if (root._gpTimer) { clearTimeout(root._gpTimer); root._gpTimer = null; }
+    clearSlideshowTimer(root);
+    const media = currentMedia(root);
+    if (media instanceof HTMLVideoElement) media.pause();
   }
-  function scheduleTick(root, secs) {
-    if (root._gpTimer) clearTimeout(root._gpTimer);
+  
+  function clearSlideshowTimer(root) {
+    if (!root._gpTimer) return;
+    clearTimeout(root._gpTimer);
+    root._gpTimer = null;
+  }
+  
+  function detachVideoTracking(root) {
+    const tracked = root._gpTrackedVideo;
+    if (!(tracked instanceof HTMLVideoElement)) return;
+    if (root._gpVideoEndedHandler) tracked.removeEventListener('ended', root._gpVideoEndedHandler);
+    root._gpTrackedVideo = null;
+    root._gpVideoEndedHandler = null;
+  }
+  
+  function configureVideo(root, video, resetProgress) {
+    clearSlideshowTimer(root);
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.loop = false;
+    video.muted = !!gpSettings().videoMuted;
+  
+    if (root._gpTrackedVideo !== video) {
+      detachVideoTracking(root);
+      root._gpTrackedVideo = video;
+      root._gpVideoCompletedSec = 0;
+      root._gpVideoEndedHandler = () => {
+        if (root.dataset.gpPlaying !== '1' || currentMedia(root) !== video) return;
+        const duration = Number(video.duration);
+        if (!Number.isFinite(duration) || duration <= 0) {
+          goNext(root);
+          return;
+        }
+  
+        root._gpVideoCompletedSec = (Number(root._gpVideoCompletedSec) || 0) + duration;
+        const minimum = Math.max(0, Number(gpSettings().videoLoopTimeSec) || 0);
+        if (root._gpVideoCompletedSec + 0.01 >= minimum) {
+          goNext(root);
+          return;
+        }
+  
+        video.currentTime = 0;
+        video.play().catch(() => {});
+      };
+      video.addEventListener('ended', root._gpVideoEndedHandler);
+    } else if (resetProgress) {
+      root._gpVideoCompletedSec = 0;
+    }
+  
+    if (root.dataset.gpPlaying === '1') video.play().catch(() => {});
+  }
+  
+  function scheduleCurrentMedia(root, resetVideoProgress = true) {
+    clearSlideshowTimer(root);
+    const media = currentMedia(root);
+    if (!media) return;
+    root._gpActiveMedia = media;
+  
+    if (media instanceof HTMLVideoElement) {
+      configureVideo(root, media, resetVideoProgress);
+      return;
+    }
+  
+    detachVideoTracking(root);
+    if (root.dataset.gpPlaying !== '1') return;
+    const seconds = Math.max(0.1, Number(gpSettings().slideshowSpeedSec) || 3);
     root._gpTimer = setTimeout(() => {
-      if (root.dataset.gpPlaying !== '1') return;
-      goNext(root);
-      scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
-    }, Math.max(100, secs * 1000));
+      root._gpTimer = null;
+      if (root.dataset.gpPlaying === '1') goNext(root);
+    }, seconds * 1000);
   }
   
   function goNext(root) {
     const list = currentGalleryList(root);
-    const img = root.querySelector('img');
-    if (!img || !list.length) return;
-    const i = indexInList(list, img.src);
+    const media = currentMedia(root);
+    if (!media || !list.length) return;
+    const i = indexInList(list, media.src);
     const nextIdx = i >= 0 ? (i + 1) % list.length : 0;
-    transitionTo(root, img, list[nextIdx]);
+    const nextMedia = transitionTo(root, media, list[nextIdx]);
+    root._gpActiveMedia = nextMedia;
+    scheduleCurrentMedia(root, true);
     preload(list[(nextIdx + 1) % list.length]);
   }
   function goPrev(root) {
     const list = currentGalleryList(root);
-    const img = root.querySelector('img');
-    if (!img || !list.length) return;
-    const i = indexInList(list, img.src);
+    const media = currentMedia(root);
+    if (!media || !list.length) return;
+    const i = indexInList(list, media.src);
     const prevIdx = i >= 0 ? (i - 1 + list.length) % list.length : list.length - 1;
-    transitionTo(root, img, list[prevIdx]);
+    const prevMedia = transitionTo(root, media, list[prevIdx]);
+    root._gpActiveMedia = prevMedia;
+    scheduleCurrentMedia(root, true);
     preload(list[(prevIdx - 1 + list.length) % list.length]);
+  }
+  
+  function currentMedia(root) {
+    if (root._gpActiveMedia instanceof Element && root._gpActiveMedia.isConnected) {
+      return root._gpActiveMedia;
+    }
+    return root.querySelector('.gp-layer.base, :scope > video, :scope > img, .gp-layer.next');
   }
   
   function randomizeGalleryOrder(root) {
     const list = [...currentGalleryList(root)];
     if (list.length < 2) return;
   
-    const img = root.querySelector('img');
-    const currentIndex = img ? indexInList(list, img.src) : -1;
+    const media = currentMedia(root);
+    const currentIndex = media ? indexInList(list, media.src) : -1;
     const current = currentIndex >= 0 ? list.splice(currentIndex, 1)[0] : null;
     shuffleInPlace(list);
     root._gpGalleryList = current ? [current, ...list] : list;
@@ -557,9 +767,14 @@
       ? String(folderInput.value || '')
       : '';
   
-    const img = root.querySelector('img');
+    const media = currentMedia(root);
+    root._gpActiveMedia = media;
+    if (media instanceof HTMLVideoElement) {
+      media.muted = !!gpSettings().videoMuted;
+      media.loop = false;
+    }
     try {
-      root._gpGalleryBaseUrl = img?.src ? new URL('.', img.src).href : '';
+      root._gpGalleryBaseUrl = media?.src ? new URL('.', media.src).href : '';
     } catch {
       root._gpGalleryBaseUrl = '';
     }
@@ -627,6 +842,7 @@
             folder: root._gpGalleryFolder,
             sortField,
             sortOrder,
+            type: 0b011,
           }),
         });
         if (!response.ok) return await fetchGalleryListFromCommand(context);
@@ -736,6 +952,13 @@
   
   function preload(src) {
     if (!src) return;
+    if (isVideoSource(src)) {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.src = src;
+      return;
+    }
     const i = new Image();
     i.decoding = 'async';
     i.loading = 'eager';
@@ -755,7 +978,22 @@
   
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async function galleryPlusFetch(input, init) {
-      const response = await nativeFetch(input, init);
+      let effectiveInit = init;
+      try {
+        const url = typeof input === 'string' ? input : input?.url;
+        const pathname = new URL(url, location.href).pathname;
+        if (pathname === '/api/images/list' && typeof init?.body === 'string') {
+          const requestBody = JSON.parse(init.body);
+          effectiveInit = {
+            ...init,
+            body: JSON.stringify({ ...requestBody, type: 0b011 }),
+          };
+        }
+      } catch (error) {
+        console.warn('[GalleryPlus] Could not add videos to gallery request', error);
+      }
+  
+      const response = await nativeFetch(input, effectiveInit);
       try {
         const url = typeof input === 'string' ? input : input?.url;
         const pathname = new URL(url, location.href).pathname;
@@ -763,7 +1001,7 @@
           return response;
         }
   
-        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        const body = typeof effectiveInit?.body === 'string' ? JSON.parse(effectiveInit.body) : null;
         const folder = typeof body?.folder === 'string' ? body.folder : '';
         if (!folder) return response;
   

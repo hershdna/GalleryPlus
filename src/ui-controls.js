@@ -1,5 +1,5 @@
 import { gpSettings, gpSaveSettings } from './settings.js';
-import { transitionTo } from './transitions.js';
+import { isVideoSource, transitionTo } from './transitions.js';
 
 export function wireViewer(root) {
   if (!root || root.dataset.gpWired === '1') return;
@@ -68,9 +68,6 @@ function injectLeftControls(root, pcBar) {
 
   function stepSlideshow(direction) {
     if (direction < 0) goPrev(root); else goNext(root);
-    if (root.dataset.gpPlaying === '1') {
-      scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
-    }
   }
 
   // ⏮️ previous image
@@ -124,6 +121,65 @@ function injectLeftControls(root, pcBar) {
   randomBtn.appendChild(randomIcon);
   randomBtn.addEventListener('click', () => randomizeGalleryOrder(root));
 
+  // 🔊 globally mute/unmute slideshow videos
+  const muteBtn = document.createElement('button');
+  muteBtn.className = 'gp-btn gp-mute';
+  muteBtn.setAttribute('aria-pressed', String(!!gpSettings().videoMuted));
+  const muteIcon = document.createElement('span');
+  muteIcon.setAttribute('aria-hidden', 'true');
+  muteBtn.appendChild(muteIcon);
+
+  function refreshMuteButton() {
+    const muted = !!gpSettings().videoMuted;
+    muteIcon.textContent = muted ? '🔇' : '🔊';
+    muteBtn.classList.toggle('active', muted);
+    muteBtn.setAttribute('aria-pressed', String(muted));
+    muteBtn.title = muted ? 'Unmute all slideshow videos' : 'Mute all slideshow videos';
+    muteBtn.setAttribute('aria-label', muteBtn.title);
+  }
+  muteBtn.addEventListener('click', () => {
+    const muted = !gpSettings().videoMuted;
+    gpSaveSettings({ videoMuted: muted });
+    document.querySelectorAll('.galleryImageDraggable video').forEach((video) => {
+      video.muted = muted;
+    });
+    refreshMuteButton();
+  });
+  refreshMuteButton();
+
+  // minimum total video play time; advancement always waits for a loop boundary
+  const videoLoopWrap = document.createElement('label');
+  videoLoopWrap.className = 'gp-video-loop-wrap';
+  videoLoopWrap.title = 'Minimum video play time; short videos repeat to the next completed loop';
+  const videoLoopLabel = document.createElement('span');
+  videoLoopLabel.textContent = 'Video';
+  const videoLoop = document.createElement('input');
+  videoLoop.type = 'number';
+  videoLoop.min = '0';
+  videoLoop.max = '3600';
+  videoLoop.step = '1';
+  videoLoop.className = 'gp-video-loop';
+  videoLoop.value = String(gpSettings().videoLoopTimeSec ?? 10);
+  videoLoop.setAttribute('aria-label', 'Minimum video play time in seconds');
+  const videoLoopUnit = document.createElement('span');
+  videoLoopUnit.textContent = 's';
+  videoLoop.addEventListener('input', () => {
+    const value = Number(videoLoop.value);
+    if (Number.isFinite(value) && value >= 0 && value <= 3600) {
+      gpSaveSettings({ videoLoopTimeSec: value });
+    }
+  });
+  videoLoop.addEventListener('change', () => {
+    let value = Number(videoLoop.value);
+    if (!Number.isFinite(value) || value < 0) value = 0;
+    if (value > 3600) value = 3600;
+    videoLoop.value = String(value);
+    gpSaveSettings({ videoLoopTimeSec: value });
+  });
+  videoLoopWrap.appendChild(videoLoopLabel);
+  videoLoopWrap.appendChild(videoLoop);
+  videoLoopWrap.appendChild(videoLoopUnit);
+
   // ⛶ fullscreen
   const fsBtn = document.createElement('button');
   fsBtn.className = 'gp-btn gp-fs';
@@ -166,7 +222,9 @@ function injectLeftControls(root, pcBar) {
     speed.value = String(v);
     gpSaveSettings({ slideshowSpeedSec: v });
     refreshSpeedDisplay();
-    if (root.dataset.gpPlaying === '1') startSlideshow(root);
+    if (root.dataset.gpPlaying === '1' && !(currentMedia(root) instanceof HTMLVideoElement)) {
+      scheduleCurrentMedia(root, false);
+    }
   });
   refreshSpeedDisplay();
   speedWrap.appendChild(speed);
@@ -203,8 +261,10 @@ function injectLeftControls(root, pcBar) {
   left.appendChild(playBtn);
   left.appendChild(nextBtn);
   left.appendChild(randomBtn);
+  left.appendChild(muteBtn);
   left.appendChild(fsBtn);
   left.appendChild(speedWrap);
+  left.appendChild(videoLoopWrap);
   left.appendChild(sel);
 }
 function saveDefaultRect(root) {
@@ -228,9 +288,6 @@ function applyDefaultRect(root) {
 }
 
 function wireZoomAndPan(root) {
-  const img = root.querySelector('img');
-  if (!img) return;
-
   let scale = 1;
   let tx = 0, ty = 0;
 
@@ -238,7 +295,14 @@ function wireZoomAndPan(root) {
   let panStartX = 0, panStartY = 0;
   let panBaseX = 0, panBaseY = 0;
 
+  function getImage() {
+    const media = currentMedia(root);
+    return media instanceof HTMLImageElement ? media : null;
+  }
+
   function applyTransform() {
+    const img = getImage();
+    if (!img) return;
     img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
     img.style.transformOrigin = 'center center';
     img.style.willChange = 'transform';
@@ -246,6 +310,8 @@ function wireZoomAndPan(root) {
 
   function onWheel(e) {
     if (gpSettings().hoverZoom) return;
+    const img = getImage();
+    if (!img) return;
     if (!e.ctrlKey) {
       e.preventDefault();
       const delta = -Math.sign(e.deltaY) * 0.1;
@@ -266,6 +332,8 @@ function wireZoomAndPan(root) {
 
   function onMoveHover(e) {
     if (!gpSettings().hoverZoom) return;
+    const img = getImage();
+    if (!img) return;
     const rect = img.getBoundingClientRect();
     const nx = ((e.clientX - rect.left) / rect.width - 0.5) * -1;
     const ny = ((e.clientY - rect.top) / rect.height - 0.5) * -1;
@@ -285,6 +353,8 @@ function wireZoomAndPan(root) {
     if (gpSettings().hoverZoom) return;
     if (e.button !== 0) return;
     if (scale <= 1.001) return;
+    const img = getImage();
+    if (!img || e.target !== img) return;
     isPanning = true;
     root.classList.add('gp-panning');
     panStartX = e.clientX;
@@ -312,7 +382,7 @@ function wireZoomAndPan(root) {
   root.addEventListener('wheel', onWheel, { passive: false });
   root.addEventListener('mousemove', onMoveHover);
   root.addEventListener('mouseleave', onLeaveHover);
-  img.addEventListener('mousedown', onMouseDown);
+  root.addEventListener('mousedown', onMouseDown);
 
   applyTransform();
 }
@@ -362,46 +432,123 @@ function wireFullscreenStateSync(root) {
 
 function startSlideshow(root) {
   root.dataset.gpPlaying = '1';
-  scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
+  scheduleCurrentMedia(root, false);
 }
 function stopSlideshow(root) {
   root.dataset.gpPlaying = '0';
-  if (root._gpTimer) { clearTimeout(root._gpTimer); root._gpTimer = null; }
+  clearSlideshowTimer(root);
+  const media = currentMedia(root);
+  if (media instanceof HTMLVideoElement) media.pause();
 }
-function scheduleTick(root, secs) {
-  if (root._gpTimer) clearTimeout(root._gpTimer);
+
+function clearSlideshowTimer(root) {
+  if (!root._gpTimer) return;
+  clearTimeout(root._gpTimer);
+  root._gpTimer = null;
+}
+
+function detachVideoTracking(root) {
+  const tracked = root._gpTrackedVideo;
+  if (!(tracked instanceof HTMLVideoElement)) return;
+  if (root._gpVideoEndedHandler) tracked.removeEventListener('ended', root._gpVideoEndedHandler);
+  root._gpTrackedVideo = null;
+  root._gpVideoEndedHandler = null;
+}
+
+function configureVideo(root, video, resetProgress) {
+  clearSlideshowTimer(root);
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = 'auto';
+  video.loop = false;
+  video.muted = !!gpSettings().videoMuted;
+
+  if (root._gpTrackedVideo !== video) {
+    detachVideoTracking(root);
+    root._gpTrackedVideo = video;
+    root._gpVideoCompletedSec = 0;
+    root._gpVideoEndedHandler = () => {
+      if (root.dataset.gpPlaying !== '1' || currentMedia(root) !== video) return;
+      const duration = Number(video.duration);
+      if (!Number.isFinite(duration) || duration <= 0) {
+        goNext(root);
+        return;
+      }
+
+      root._gpVideoCompletedSec = (Number(root._gpVideoCompletedSec) || 0) + duration;
+      const minimum = Math.max(0, Number(gpSettings().videoLoopTimeSec) || 0);
+      if (root._gpVideoCompletedSec + 0.01 >= minimum) {
+        goNext(root);
+        return;
+      }
+
+      video.currentTime = 0;
+      video.play().catch(() => {});
+    };
+    video.addEventListener('ended', root._gpVideoEndedHandler);
+  } else if (resetProgress) {
+    root._gpVideoCompletedSec = 0;
+  }
+
+  if (root.dataset.gpPlaying === '1') video.play().catch(() => {});
+}
+
+function scheduleCurrentMedia(root, resetVideoProgress = true) {
+  clearSlideshowTimer(root);
+  const media = currentMedia(root);
+  if (!media) return;
+  root._gpActiveMedia = media;
+
+  if (media instanceof HTMLVideoElement) {
+    configureVideo(root, media, resetVideoProgress);
+    return;
+  }
+
+  detachVideoTracking(root);
+  if (root.dataset.gpPlaying !== '1') return;
+  const seconds = Math.max(0.1, Number(gpSettings().slideshowSpeedSec) || 3);
   root._gpTimer = setTimeout(() => {
-    if (root.dataset.gpPlaying !== '1') return;
-    goNext(root);
-    scheduleTick(root, gpSettings().slideshowSpeedSec || 3);
-  }, Math.max(100, secs * 1000));
+    root._gpTimer = null;
+    if (root.dataset.gpPlaying === '1') goNext(root);
+  }, seconds * 1000);
 }
 
 function goNext(root) {
   const list = currentGalleryList(root);
-  const img = root.querySelector('img');
-  if (!img || !list.length) return;
-  const i = indexInList(list, img.src);
+  const media = currentMedia(root);
+  if (!media || !list.length) return;
+  const i = indexInList(list, media.src);
   const nextIdx = i >= 0 ? (i + 1) % list.length : 0;
-  transitionTo(root, img, list[nextIdx]);
+  const nextMedia = transitionTo(root, media, list[nextIdx]);
+  root._gpActiveMedia = nextMedia;
+  scheduleCurrentMedia(root, true);
   preload(list[(nextIdx + 1) % list.length]);
 }
 function goPrev(root) {
   const list = currentGalleryList(root);
-  const img = root.querySelector('img');
-  if (!img || !list.length) return;
-  const i = indexInList(list, img.src);
+  const media = currentMedia(root);
+  if (!media || !list.length) return;
+  const i = indexInList(list, media.src);
   const prevIdx = i >= 0 ? (i - 1 + list.length) % list.length : list.length - 1;
-  transitionTo(root, img, list[prevIdx]);
+  const prevMedia = transitionTo(root, media, list[prevIdx]);
+  root._gpActiveMedia = prevMedia;
+  scheduleCurrentMedia(root, true);
   preload(list[(prevIdx - 1 + list.length) % list.length]);
+}
+
+function currentMedia(root) {
+  if (root._gpActiveMedia instanceof Element && root._gpActiveMedia.isConnected) {
+    return root._gpActiveMedia;
+  }
+  return root.querySelector('.gp-layer.base, :scope > video, :scope > img, .gp-layer.next');
 }
 
 function randomizeGalleryOrder(root) {
   const list = [...currentGalleryList(root)];
   if (list.length < 2) return;
 
-  const img = root.querySelector('img');
-  const currentIndex = img ? indexInList(list, img.src) : -1;
+  const media = currentMedia(root);
+  const currentIndex = media ? indexInList(list, media.src) : -1;
   const current = currentIndex >= 0 ? list.splice(currentIndex, 1)[0] : null;
   shuffleInPlace(list);
   root._gpGalleryList = current ? [current, ...list] : list;
@@ -425,9 +572,14 @@ function initializeGalleryList(root) {
     ? String(folderInput.value || '')
     : '';
 
-  const img = root.querySelector('img');
+  const media = currentMedia(root);
+  root._gpActiveMedia = media;
+  if (media instanceof HTMLVideoElement) {
+    media.muted = !!gpSettings().videoMuted;
+    media.loop = false;
+  }
   try {
-    root._gpGalleryBaseUrl = img?.src ? new URL('.', img.src).href : '';
+    root._gpGalleryBaseUrl = media?.src ? new URL('.', media.src).href : '';
   } catch {
     root._gpGalleryBaseUrl = '';
   }
@@ -495,6 +647,7 @@ async function fetchGalleryList(root) {
           folder: root._gpGalleryFolder,
           sortField,
           sortOrder,
+          type: 0b011,
         }),
       });
       if (!response.ok) return await fetchGalleryListFromCommand(context);
@@ -604,6 +757,13 @@ function indexInList(list, src) {
 
 function preload(src) {
   if (!src) return;
+  if (isVideoSource(src)) {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.src = src;
+    return;
+  }
   const i = new Image();
   i.decoding = 'async';
   i.loading = 'eager';

@@ -13,7 +13,22 @@ export function installCustomOrderFetchHook() {
 
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async function galleryPlusFetch(input, init) {
-    const response = await nativeFetch(input, init);
+    let effectiveInit = init;
+    try {
+      const url = typeof input === 'string' ? input : input?.url;
+      const pathname = new URL(url, location.href).pathname;
+      if (pathname === '/api/images/list' && typeof init?.body === 'string') {
+        const requestBody = JSON.parse(init.body);
+        effectiveInit = {
+          ...init,
+          body: JSON.stringify({ ...requestBody, type: 0b011 }),
+        };
+      }
+    } catch (error) {
+      console.warn('[GalleryPlus] Could not add videos to gallery request', error);
+    }
+
+    const response = await nativeFetch(input, effectiveInit);
     try {
       const url = typeof input === 'string' ? input : input?.url;
       const pathname = new URL(url, location.href).pathname;
@@ -21,7 +36,7 @@ export function installCustomOrderFetchHook() {
         return response;
       }
 
-      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+      const body = typeof effectiveInit?.body === 'string' ? JSON.parse(effectiveInit.body) : null;
       const folder = typeof body?.folder === 'string' ? body.folder : '';
       if (!folder) return response;
 

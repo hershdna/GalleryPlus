@@ -12,6 +12,8 @@ const DEFAULTS = {
   webpOnly: false,
   slideshowSpeedSec: 3,
   slideshowTransition: 'fade',
+  videoMuted: false,
+  videoLoopTimeSec: 10,
   customOrders: {},
 };
 
