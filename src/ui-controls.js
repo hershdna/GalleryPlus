@@ -579,7 +579,9 @@ function initializeGalleryList(root) {
     media.loop = false;
   }
   try {
-    root._gpGalleryBaseUrl = media?.src ? new URL('.', media.src).href : '';
+    root._gpGalleryBaseUrl = root._gpGalleryFolder
+      ? new URL(`/user/images/${encodeURIComponent(root._gpGalleryFolder)}/`, location.origin).href
+      : (media?.src ? new URL('.', media.src).href : '');
   } catch {
     root._gpGalleryBaseUrl = '';
   }
@@ -769,4 +771,3 @@ function preload(src) {
   i.loading = 'eager';
   i.src = src;
 }
-

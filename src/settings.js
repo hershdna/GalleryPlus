@@ -14,6 +14,7 @@ const DEFAULTS = {
   slideshowTransition: 'fade',
   videoMuted: false,
   videoLoopTimeSec: 10,
+  externalSources: {},
   customOrders: {},
 };
 
@@ -62,4 +63,3 @@ export function gpSaveSettings(partial = {}) {
     localStorage.setItem('GP_SETTINGS', JSON.stringify(merged));
   }
 }
-

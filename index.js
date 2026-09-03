@@ -17,6 +17,7 @@
     slideshowTransition: 'fade',
     videoMuted: false,
     videoLoopTimeSec: 10,
+    externalSources: {},
     customOrders: {},
   };
   
@@ -774,7 +775,9 @@
       media.loop = false;
     }
     try {
-      root._gpGalleryBaseUrl = media?.src ? new URL('.', media.src).href : '';
+      root._gpGalleryBaseUrl = root._gpGalleryFolder
+        ? new URL(`/user/images/${encodeURIComponent(root._gpGalleryFolder)}/`, location.origin).href
+        : (media?.src ? new URL('.', media.src).href : '');
     } catch {
       root._gpGalleryBaseUrl = '';
     }
@@ -968,9 +971,12 @@
   const CUSTOM_SORT = 'custom';
   const ARCHIVE_ENDPOINT = '/api/plugins/galleryplus/archive';
   const OPEN_FOLDER_ENDPOINT = '/api/plugins/galleryplus/open-folder';
+  const EXTERNAL_LIST_ENDPOINT = '/api/plugins/galleryplus/external-media/list';
+  const EXTERNAL_FILE_PREFIX = '/api/plugins/galleryplus/external-media/file/';
   const SERVER_HEALTH_ENDPOINT = '/api/plugins/galleryplus/health';
   let archiveModeActive = false;
   let fetchHookInstalled = false;
+  const externalEntriesByName = new Map();
   
   function installCustomOrderFetchHook() {
     if (fetchHookInstalled) return;
@@ -979,11 +985,13 @@
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async function galleryPlusFetch(input, init) {
       let effectiveInit = init;
+      let pathname = '';
+      let requestBody = null;
       try {
         const url = typeof input === 'string' ? input : input?.url;
-        const pathname = new URL(url, location.href).pathname;
+        pathname = new URL(url, location.href).pathname;
         if (pathname === '/api/images/list' && typeof init?.body === 'string') {
-          const requestBody = JSON.parse(init.body);
+          requestBody = JSON.parse(init.body);
           effectiveInit = {
             ...init,
             body: JSON.stringify({ ...requestBody, type: 0b011 }),
@@ -995,23 +1003,39 @@
   
       const response = await nativeFetch(input, effectiveInit);
       try {
-        const url = typeof input === 'string' ? input : input?.url;
-        const pathname = new URL(url, location.href).pathname;
-        if (pathname !== '/api/images/list' || getGallerySort() !== CUSTOM_SORT || !response.ok) {
+        if (pathname !== '/api/images/list' || !response.ok) {
           return response;
         }
   
-        const body = typeof effectiveInit?.body === 'string' ? JSON.parse(effectiveInit.body) : null;
+        const body = requestBody
+          ?? (typeof effectiveInit?.body === 'string' ? JSON.parse(effectiveInit.body) : null);
         const folder = typeof body?.folder === 'string' ? body.folder : '';
         if (!folder) return response;
   
         const files = await response.clone().json();
         if (!Array.isArray(files)) return response;
   
-        const ordered = applyStoredOrder(folder, files.map(String));
+        const augmented = files.map(String);
+        const sources = getExternalSources(folder);
+        if (sources.length) {
+          try {
+            const external = await fetchExternalMedia(sources, nativeFetch);
+            external.items.forEach((item) => {
+              const galleryPath = externalItemToGalleryPath(item);
+              if (galleryPath && !augmented.includes(galleryPath)) augmented.push(galleryPath);
+            });
+          } catch (error) {
+            console.warn('[GalleryPlus] Could not add external media to gallery', error);
+          }
+        }
+  
+        const result = getGallerySort() === CUSTOM_SORT
+          ? applyStoredOrder(folder, augmented)
+          : augmented;
+        if (sameList(files.map(String), result)) return response;
         const headers = new Headers(response.headers);
         headers.delete('content-length');
-        return new Response(JSON.stringify(ordered), {
+        return new Response(JSON.stringify(result), {
           status: response.status,
           statusText: response.statusText,
           headers,
@@ -1033,6 +1057,7 @@
     root.dataset.gpGalleryWired = '1';
     ensureCustomSortOption(sortSelect);
     installOpenFolderControl(root);
+    installExternalSourcesControl(root, sortSelect);
     installArchiveControl(root, gallery, sortSelect);
     installReordering(root, gallery, sortSelect);
     updateCustomOrderHint(root, sortSelect);
@@ -1093,6 +1118,173 @@
     const folderAccept = topBar.querySelector('.fa-check');
     if (folderAccept) folderAccept.insertAdjacentElement('afterend', button);
     else topBar.appendChild(button);
+  }
+  
+  function installExternalSourcesControl(root, sortSelect) {
+    const folderInput = root.querySelector('.gallery-folder-input');
+    const topBar = folderInput?.parentElement;
+    if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-external-sources')) return;
+  
+    const dropdown = document.createElement('details');
+    dropdown.className = 'gp-external-sources';
+  
+    const summary = document.createElement('summary');
+    summary.className = 'right_menu_button fa-solid fa-link fa-fw gp-external-sources-button';
+    summary.title = 'Add external files and folders';
+    summary.setAttribute('aria-label', summary.title);
+    dropdown.appendChild(summary);
+  
+    const panel = document.createElement('div');
+    panel.className = 'gp-external-sources-panel';
+  
+    const label = document.createElement('label');
+    label.className = 'gp-external-sources-label';
+    label.textContent = 'External files and folders';
+  
+    const textarea = document.createElement('textarea');
+    textarea.className = 'gp-external-sources-input text_pole';
+    textarea.rows = 7;
+    textarea.placeholder = 'One file or folder address per line';
+    textarea.spellcheck = false;
+    label.appendChild(textarea);
+    panel.appendChild(label);
+  
+    const help = document.createElement('small');
+    help.className = 'gp-external-sources-help';
+    help.textContent = 'Folders include supported images and videos in all subfolders. Files remain in their original locations.';
+    panel.appendChild(help);
+  
+    const status = document.createElement('div');
+    status.className = 'gp-external-sources-status';
+    status.setAttribute('aria-live', 'polite');
+    panel.appendChild(status);
+  
+    const saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.className = 'menu_button gp-external-sources-save';
+    saveButton.textContent = 'Apply';
+    panel.appendChild(saveButton);
+    dropdown.appendChild(panel);
+  
+    const positionPanel = () => {
+      const anchor = summary.getBoundingClientRect();
+      const margin = 8;
+      const width = Math.min(420, Math.max(240, window.innerWidth * 0.85));
+      panel.style.width = `${width}px`;
+      panel.style.left = `${Math.max(margin, Math.min(anchor.left, window.innerWidth - width - margin))}px`;
+      panel.style.top = `${anchor.bottom + 6}px`;
+      requestAnimationFrame(() => {
+        const panelRect = panel.getBoundingClientRect();
+        if (panelRect.bottom > window.innerHeight - margin && anchor.top > panelRect.height + margin) {
+          panel.style.top = `${anchor.top - panelRect.height - 6}px`;
+        }
+      });
+    };
+  
+    dropdown.addEventListener('toggle', () => {
+      if (!dropdown.open) {
+        window.removeEventListener('resize', positionPanel);
+        return;
+      }
+      const folder = getGalleryFolder(root);
+      textarea.value = getExternalSources(folder).join('\n');
+      status.textContent = folder ? '' : 'Choose a gallery folder first.';
+      positionPanel();
+      window.addEventListener('resize', positionPanel);
+      requestAnimationFrame(() => textarea.focus());
+    });
+  
+    panel.addEventListener('click', event => event.stopPropagation());
+    saveButton.addEventListener('click', async () => {
+      if (saveButton.disabled) return;
+      const folder = getGalleryFolder(root);
+      if (!folder) {
+        status.textContent = 'Choose a gallery folder first.';
+        return;
+      }
+  
+      const sources = [...new Set(textarea.value
+        .split(/\r?\n/)
+        .map(value => value.trim())
+        .filter(Boolean))];
+      saveButton.disabled = true;
+      status.textContent = 'Checking addresses…';
+      try {
+        const external = await fetchExternalMedia(sources, window.fetch, true);
+        saveExternalSources(folder, sources);
+        status.textContent = `${external.items.length} external media file${external.items.length === 1 ? '' : 's'} found.`;
+        if (external.errors.length) {
+          const details = external.errors.slice(0, 3)
+            .map(error => `${error.source}: ${error.message}`)
+            .join('\n');
+          notify('info', `Saved, but ${external.errors.length} address${external.errors.length === 1 ? '' : 'es'} could not be read.\n${details}`);
+        } else {
+          notify('success', 'External gallery sources updated.');
+        }
+        dropdown.open = false;
+        refreshGallery(sortSelect);
+      } catch (error) {
+        console.error('[GalleryPlus] Failed to update external gallery sources', error);
+        status.textContent = error?.message || 'Could not read the external sources.';
+        notify('error', status.textContent);
+      } finally {
+        saveButton.disabled = false;
+      }
+    });
+  
+    const openFolderButton = topBar.querySelector('.gp-open-folder');
+    if (openFolderButton) openFolderButton.insertAdjacentElement('afterend', dropdown);
+    else topBar.appendChild(dropdown);
+  }
+  
+  function getExternalSources(folder) {
+    const stored = gpSettings().externalSources?.[folder];
+    return Array.isArray(stored) ? stored.filter(source => typeof source === 'string' && source.trim()) : [];
+  }
+  
+  function saveExternalSources(folder, sources) {
+    if (!folder) return;
+    const externalSources = { ...(gpSettings().externalSources || {}) };
+    if (sources.length) externalSources[folder] = [...sources];
+    else delete externalSources[folder];
+    gpSaveSettings({ externalSources });
+  }
+  
+  async function fetchExternalMedia(sources, fetchImpl = window.fetch, diagnose = false) {
+    const response = await fetchImpl(EXTERNAL_LIST_ENDPOINT, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+      body: JSON.stringify({ sources }),
+    });
+    if (!response.ok) {
+      const message = diagnose
+        ? await getServerError(response, 'external-media', `Could not read external media (status ${response.status}).`)
+        : `Could not read external media (status ${response.status}).`;
+      throw new Error(message);
+    }
+    const payload = await response.json();
+    return {
+      items: Array.isArray(payload?.items) ? payload.items : [],
+      errors: Array.isArray(payload?.errors) ? payload.errors : [],
+    };
+  }
+  
+  function externalItemToGalleryPath(item) {
+    try {
+      const url = new URL(String(item?.url || ''), location.origin);
+      if (url.origin !== location.origin || !url.pathname.startsWith(EXTERNAL_FILE_PREFIX)) return '';
+      const name = decodeURIComponent(url.pathname.split('/').pop() || String(item?.name || ''));
+      const galleryPath = `../../..${url.pathname}${url.search}`;
+      if (name) externalEntriesByName.set(name, galleryPath);
+      return galleryPath;
+    } catch {
+      return '';
+    }
+  }
+  
+  function isExternalGalleryPath(filename) {
+    return typeof filename === 'string'
+      && filename.startsWith(`../../..${EXTERNAL_FILE_PREFIX}`);
   }
   
   function ensureCustomSortOption(select) {
@@ -1157,6 +1349,10 @@
       const folder = getGalleryFolder(root);
       if (!filename || !folder) {
         notify('error', 'Could not determine the gallery file to remove.');
+        return;
+      }
+      if (isExternalGalleryPath(filename)) {
+        notify('info', 'This file is referenced from an external location. Remove its address from External Sources instead.');
         return;
       }
       if (!window.confirm(`Move "${filename}" to "${folder}/deprecated"?`)) return;
@@ -1263,11 +1459,22 @@
   }
   
   function getThumbnailFilename(thumbnail) {
+    const source = thumbnail.querySelector('img, video')?.src || '';
+    const sourceFilename = filenameFromSource(source);
+    if (isExternalGalleryPath(sourceFilename)) return sourceFilename;
     const title = thumbnail.getAttribute('title') || '';
-    if (title) return title;
-    const source = thumbnail.querySelector('img')?.src || '';
+    if (title) return externalEntriesByName.get(title) ?? title;
+    return sourceFilename;
+  }
+  
+  function filenameFromSource(source) {
     try {
-      return decodeURIComponent(new URL(source, location.href).pathname.split('/').pop() || '');
+      const url = new URL(source, location.href);
+      if (url.pathname.startsWith(EXTERNAL_FILE_PREFIX)) {
+        return `../../..${url.pathname}${url.search}`;
+      }
+      const name = decodeURIComponent(url.pathname.split('/').pop() || '');
+      return externalEntriesByName.get(name) ?? name;
     } catch {
       return '';
     }
@@ -1281,11 +1488,7 @@
       if (!Array.isArray(items)) return [];
       return items.map(item => {
         const source = typeof item?.responsiveURL === 'function' ? item.responsiveURL() : item?.src;
-        try {
-          return decodeURIComponent(new URL(source, location.href).pathname.split('/').pop() || '');
-        } catch {
-          return '';
-        }
+        return filenameFromSource(source);
       }).filter(Boolean);
     } catch {
       return [];
@@ -1436,4 +1639,3 @@
 
   initObservers();
 })();
-

@@ -15,6 +15,7 @@ custom image ordering, and safe gallery organization.
 - A **Custom** gallery sort mode with drag-and-drop thumbnail reordering
 - Safe Remove mode that moves files to `<gallery folder>/deprecated`
 - A gallery control that opens the current source folder in Windows Explorer
+- Per-gallery external file/folder addresses, including supported media in nested folders
 - Scroll-wheel or hover zoom and click-and-drag panning
 
 Short videos repeat until the configured minimum video play time is reached.
@@ -43,7 +44,8 @@ the same plugin ID and cannot be loaded together.
 
 The repository can still be installed as a normal SillyTavern third-party
 extension. Slideshows and custom ordering work in frontend-only mode, but safe
-removal and opening Windows Explorer require the combined installation above.
+removal, external file/folder addresses, and opening Windows Explorer require
+the combined installation above.
 
 The server plugin validates the gallery folder and filename, creates the
 `deprecated` directory when needed, and moves the file. If a filename already
@@ -53,6 +55,14 @@ exists there, it adds a numeric suffix instead of overwriting it.
 
 Click the folder-open control next to the gallery folder field. GalleryPlus asks
 the server plugin to open that gallery's source directory in Windows Explorer.
+
+## Adding files from other locations
+
+Click the link control next to the gallery folder field. Enter one full file or
+folder address per line, then click **Apply**. Folder addresses are scanned
+recursively for supported image and video files. The addresses are saved for
+the current gallery folder, while the original files stay in place. To remove
+an external item from the gallery, edit or remove its address from this list.
 
 ## Using custom order
 
@@ -74,4 +84,3 @@ The modular source is in `src/`. Build the release script with:
 npm install
 npm run build
 ```
-

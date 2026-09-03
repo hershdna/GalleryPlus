@@ -1,11 +1,18 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { version } = require('./package.json');
 
-const CAPABILITIES = ['archive', 'open-folder'];
+const CAPABILITIES = ['archive', 'open-folder', 'external-media'];
 const FRONTEND_FILES = ['manifest.json', 'index.js', 'style.css', 'settings.html'];
 const EXTENSION_HOME_PAGE = 'https://github.com/theFisher86/GalleryPlus';
+const USABLE_MEDIA_EXTENSIONS = new Set([
+  '.bmp', '.gif', '.jfif', '.jpeg', '.jpg', '.png', '.webp',
+  '.mov', '.mp4', '.webm',
+]);
+const externalMediaFiles = new Map();
 
 async function findFrontendTarget(extensionsRoot) {
   const defaultTarget = path.join(extensionsRoot, 'GalleryPlus');
@@ -85,6 +92,93 @@ function resolveGalleryDirectory(imagesRoot, folder) {
   const relative = path.relative(resolvedRoot, directory);
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
   return directory;
+}
+
+function normalizeSourceAddress(value) {
+  if (typeof value !== 'string') return null;
+  let address = value.trim();
+  if ((address.startsWith('"') && address.endsWith('"'))
+    || (address.startsWith("'") && address.endsWith("'"))) {
+    address = address.slice(1, -1).trim();
+  }
+  if (!address) return null;
+  address = address.replace(/%([^%]+)%/g, (match, name) => process.env[name] ?? match);
+  if (address === '~') address = os.homedir();
+  else if (address.startsWith(`~${path.sep}`) || address.startsWith('~/') || address.startsWith('~\\')) {
+    address = path.join(os.homedir(), address.slice(2));
+  }
+  return path.resolve(address);
+}
+
+function isUsableMediaFile(filePath) {
+  return USABLE_MEDIA_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+function mediaToken(filePath) {
+  return crypto.createHash('sha256').update(filePath).digest('hex');
+}
+
+async function collectMediaFromDirectory(directory, files, limit) {
+  if (files.length >= limit) return;
+  const entries = await fs.promises.readdir(directory, { withFileTypes: true }).catch(() => []);
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    if (files.length >= limit) break;
+    if (entry.isSymbolicLink()) continue;
+    const candidate = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      await collectMediaFromDirectory(candidate, files, limit);
+    } else if (entry.isFile() && isUsableMediaFile(candidate)) {
+      files.push(candidate);
+    }
+  }
+}
+
+async function collectExternalMedia(sources) {
+  const files = [];
+  const errors = [];
+  const seen = new Set();
+
+  for (const source of sources.slice(0, 100)) {
+    const resolved = normalizeSourceAddress(source);
+    if (!resolved) continue;
+    const stat = await fs.promises.stat(resolved).catch(() => null);
+    if (!stat) {
+      errors.push({ source, message: 'Path not found.' });
+      continue;
+    }
+
+    let candidates = [];
+    if (stat.isFile()) {
+      candidates = [resolved];
+    } else if (stat.isDirectory()) {
+      await collectMediaFromDirectory(resolved, candidates, 10000 - files.length);
+    } else {
+      errors.push({ source, message: 'Path is not a file or folder.' });
+      continue;
+    }
+
+    for (const candidate of candidates) {
+      if (files.length >= 10000) break;
+      if (!isUsableMediaFile(candidate)) continue;
+      const normalized = path.resolve(candidate);
+      const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      files.push(normalized);
+    }
+  }
+
+  const items = files.map((filePath) => {
+    const token = mediaToken(filePath);
+    externalMediaFiles.set(token, filePath);
+    const name = path.basename(filePath);
+    return {
+      name,
+      url: `/api/plugins/galleryplus/external-media/file/${token}/${encodeURIComponent(name)}`,
+    };
+  });
+  return { items, errors };
 }
 
 async function init(router) {
@@ -185,6 +279,31 @@ async function init(router) {
     }
   });
 
+  router.post('/external-media/list', async (request, response) => {
+    try {
+      const sources = request.body?.sources;
+      if (!Array.isArray(sources) || sources.some(source => typeof source !== 'string')) {
+        return response.status(400).send('External sources must be an array of file or folder addresses.');
+      }
+      return response.json(await collectExternalMedia(sources));
+    } catch (error) {
+      console.error('[GalleryPlus] Failed to list external media', error);
+      return response.status(500).send('Failed to list external media.');
+    }
+  });
+
+  router.get('/external-media/file/:token/:name', async (request, response) => {
+    const token = String(request.params?.token || '');
+    const filePath = externalMediaFiles.get(token);
+    if (!/^[a-f0-9]{64}$/.test(token) || !filePath || !isUsableMediaFile(filePath)) {
+      return response.sendStatus(404);
+    }
+    const stat = await fs.promises.stat(filePath).catch(() => null);
+    if (!stat?.isFile()) return response.sendStatus(404);
+    response.set('Cache-Control', 'no-store');
+    return response.sendFile(filePath);
+  });
+
   console.log('[GalleryPlus] Server plugin loaded');
   return Promise.resolve();
 }
@@ -199,11 +318,12 @@ module.exports = {
   info: {
     id: 'galleryplus',
     name: 'GalleryPlus',
-    description: 'Organizes gallery images and opens gallery source folders.',
+    description: 'Organizes galleries, opens source folders, and serves configured external media.',
   },
   resolveGalleryDirectory,
   CAPABILITIES,
   FRONTEND_FILES,
   syncFrontendFiles,
+  collectExternalMedia,
+  externalMediaFiles,
 };
-

@@ -109,6 +109,61 @@
   pointer-events: none;
 }
 
+.gp-external-sources {
+  position: relative;
+  display: inline-block;
+}
+.gp-external-sources > summary {
+  display: inline-block;
+  list-style: none;
+  cursor: pointer;
+}
+.gp-external-sources > summary::-webkit-details-marker {
+  display: none;
+}
+.gp-external-sources[open] > summary {
+  box-shadow: 0 0 0 2px var(--SmartThemeUnderlineColor, #7aa2f7) inset;
+}
+.gp-external-sources-panel {
+  position: fixed;
+  z-index: 1000;
+  width: min(420px, 85vw);
+  padding: 10px;
+  border: 1px solid var(--SmartThemeBorderColor, #666);
+  border-radius: 8px;
+  background: var(--SmartThemeBlurTintColor, #202020);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.gp-external-sources-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+}
+.gp-external-sources-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 8em;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-weight: 400;
+}
+.gp-external-sources-help,
+.gp-external-sources-status {
+  display: block;
+  margin-top: 6px;
+  white-space: pre-line;
+}
+.gp-external-sources-help {
+  opacity: 0.8;
+}
+.gp-external-sources-status {
+  min-height: 1.2em;
+}
+.gp-external-sources-save {
+  margin-top: 8px;
+}
+
 /* ===== Themed window glow ===== */
 #gallery.draggable,
 #gallery.draggable .galleryImageDraggable.draggable,
@@ -201,4 +256,3 @@
   left: auto;
   z-index: 2;
 }
-
