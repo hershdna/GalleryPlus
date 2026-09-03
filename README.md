@@ -7,7 +7,7 @@ custom image ordering, and safe gallery organization.
 
 - Slideshow playback across the complete gallery, including paginated images
 - `.mp4`, `.mov`, and `.webm` gallery items and mixed-media slideshows
-- Previous/next, play/pause, fullscreen, speed, Cut/Fade, and randomize controls
+- Previous/next, stateful play/pause, fullscreen, speed, Cut/Fade, and randomize controls
 - Global video mute and minimum video play-time controls
 - Full-image window fitting with black letterboxing instead of cropping
 - Slideshow playback and live image synchronization after the gallery closes
@@ -16,6 +16,7 @@ custom image ordering, and safe gallery organization.
 - Safe Remove mode that moves files to `<gallery folder>/deprecated`
 - A gallery control that opens the current source folder in Windows Explorer
 - Per-gallery external file/folder addresses, including supported media in nested folders
+- Per-gallery file-type filters shared by the thumbnail view and slideshow
 - Scroll-wheel or hover zoom and click-and-drag panning
 
 Short videos repeat until the configured minimum video play time is reached.
@@ -63,6 +64,12 @@ folder address per line, then click **Apply**. Folder addresses are scanned
 recursively for supported image and video files. The addresses are saved for
 the current gallery folder, while the original files stay in place. To remove
 an external item from the gallery, edit or remove its address from this list.
+
+## Filtering file types
+
+Click the filter control next to the gallery folder field, choose the image and
+video extensions to include, then click **Apply**. The selection is saved for
+the current gallery and filters both gallery thumbnails and slideshow playback.
 
 ## Using custom order
 

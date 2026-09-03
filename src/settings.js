@@ -15,6 +15,7 @@ const DEFAULTS = {
   videoMuted: false,
   videoLoopTimeSec: 10,
   externalSources: {},
+  fileTypeFilters: {},
   customOrders: {},
 };
 

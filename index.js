@@ -18,6 +18,7 @@
     videoMuted: false,
     videoLoopTimeSec: 10,
     externalSources: {},
+    fileTypeFilters: {},
     customOrders: {},
   };
   
@@ -197,6 +198,8 @@
     return next;
   }
 
+  const GALLERY_FILE_TYPES = ['bmp', 'gif', 'jfif', 'jpeg', 'jpg', 'png', 'webp', 'mov', 'mp4', 'webm'];
+  
   function wireViewer(root) {
     if (!root || root.dataset.gpWired === '1') return;
   
@@ -278,15 +281,16 @@
     prevBtn.appendChild(prevIcon);
     prevBtn.addEventListener('click', () => stepSlideshow(-1));
   
-    // ⏯️ start/pause slideshow
+    // ▶️/⏸️ start/pause slideshow
     const playBtn = document.createElement('button');
     playBtn.className = 'gp-btn gp-play';
-    const playTip = 'Start / pause slideshow (Ctrl+Space)';
+    const playTip = 'Play slideshow (Ctrl+Space)';
     playBtn.title = playTip;
     playBtn.setAttribute('aria-label', playTip);
+    playBtn.setAttribute('aria-pressed', 'false');
     const playIcon = document.createElement('span');
     playIcon.setAttribute('aria-hidden', 'true');
-    playIcon.textContent = '⏯️';
+    playIcon.textContent = '▶️';
     playBtn.appendChild(playIcon);
     playBtn.addEventListener('click', () => {
       if (root.dataset.gpPlaying === '1') stopSlideshow(root);
@@ -462,6 +466,7 @@
     left.appendChild(speedWrap);
     left.appendChild(videoLoopWrap);
     left.appendChild(sel);
+    updateSlideshowButton(root);
   }
   function saveDefaultRect(root) {
     const st = root.style;
@@ -628,13 +633,28 @@
   
   function startSlideshow(root) {
     root.dataset.gpPlaying = '1';
+    updateSlideshowButton(root);
     scheduleCurrentMedia(root, false);
   }
   function stopSlideshow(root) {
     root.dataset.gpPlaying = '0';
+    updateSlideshowButton(root);
     clearSlideshowTimer(root);
     const media = currentMedia(root);
     if (media instanceof HTMLVideoElement) media.pause();
+  }
+  
+  function updateSlideshowButton(root) {
+    const button = root.querySelector('.gp-play');
+    if (!(button instanceof HTMLButtonElement)) return;
+    const playing = root.dataset.gpPlaying === '1';
+    const label = playing ? 'Pause slideshow (Ctrl+Space)' : 'Play slideshow (Ctrl+Space)';
+    button.classList.toggle('active', playing);
+    button.setAttribute('aria-pressed', String(playing));
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    const icon = button.querySelector('[aria-hidden="true"]');
+    if (icon) icon.textContent = playing ? '⏸️' : '▶️';
   }
   
   function clearSlideshowTimer(root) {
@@ -848,7 +868,7 @@
             type: 0b011,
           }),
         });
-        if (!response.ok) return await fetchGalleryListFromCommand(context);
+        if (!response.ok) return await fetchGalleryListFromCommand(context, root._gpGalleryFolder);
   
         const files = await response.json();
         if (!Array.isArray(files)) return null;
@@ -858,10 +878,10 @@
       }
     }
   
-    return await fetchGalleryListFromCommand(context);
+    return await fetchGalleryListFromCommand(context, root._gpGalleryFolder);
   }
   
-  async function fetchGalleryListFromCommand(context) {
+  async function fetchGalleryListFromCommand(context, folder = '') {
     if (typeof context?.executeSlashCommandsWithOptions !== 'function') return null;
   
     try {
@@ -872,10 +892,25 @@
       });
       const value = result?.pipe;
       const items = Array.isArray(value) ? value : JSON.parse(value);
-      return Array.isArray(items) ? normalizeGalleryUrls(items) : null;
+      return Array.isArray(items) ? filterGalleryUrls(folder, normalizeGalleryUrls(items)) : null;
     } catch {
       return null;
     }
+  }
+  
+  function filterGalleryUrls(folder, items) {
+    const filters = gpSettings().fileTypeFilters;
+    if (!folder || !filters || !Object.prototype.hasOwnProperty.call(filters, folder)) return items;
+    const stored = Array.isArray(filters[folder]) ? filters[folder] : GALLERY_FILE_TYPES;
+    const enabled = new Set(stored.map(type => String(type).toLowerCase()));
+    return items.filter((item) => {
+      try {
+        const name = decodeURIComponent(new URL(item, location.href).pathname.split('/').pop() || '');
+        return enabled.has(name.split('.').pop()?.toLowerCase());
+      } catch {
+        return false;
+      }
+    });
   }
   
   function getSillyTavernContext() {
@@ -974,6 +1009,9 @@
   const EXTERNAL_LIST_ENDPOINT = '/api/plugins/galleryplus/external-media/list';
   const EXTERNAL_FILE_PREFIX = '/api/plugins/galleryplus/external-media/file/';
   const SERVER_HEALTH_ENDPOINT = '/api/plugins/galleryplus/health';
+  const IMAGE_FILE_TYPES = ['bmp', 'gif', 'jfif', 'jpeg', 'jpg', 'png', 'webp'];
+  const VIDEO_FILE_TYPES = ['mov', 'mp4', 'webm'];
+  const SUPPORTED_FILE_TYPES = [...IMAGE_FILE_TYPES, ...VIDEO_FILE_TYPES];
   let archiveModeActive = false;
   let fetchHookInstalled = false;
   const externalEntriesByName = new Map();
@@ -1029,9 +1067,10 @@
           }
         }
   
+        const filtered = filterFilesByType(folder, augmented);
         const result = getGallerySort() === CUSTOM_SORT
-          ? applyStoredOrder(folder, augmented)
-          : augmented;
+          ? applyStoredOrder(folder, filtered, !areAllFileTypesEnabled(folder))
+          : filtered;
         if (sameList(files.map(String), result)) return response;
         const headers = new Headers(response.headers);
         headers.delete('content-length');
@@ -1058,6 +1097,7 @@
     ensureCustomSortOption(sortSelect);
     installOpenFolderControl(root);
     installExternalSourcesControl(root, sortSelect);
+    installFileTypeFilterControl(root, sortSelect);
     installArchiveControl(root, gallery, sortSelect);
     installReordering(root, gallery, sortSelect);
     updateCustomOrderHint(root, sortSelect);
@@ -1168,10 +1208,14 @@
   
     const positionPanel = () => {
       const anchor = summary.getBoundingClientRect();
+      const galleryRect = root.getBoundingClientRect();
       const margin = 8;
-      const width = Math.min(420, Math.max(240, window.innerWidth * 0.85));
+      const width = Math.min(420, window.innerWidth - margin * 2, Math.max(240, galleryRect.width - margin * 2));
       panel.style.width = `${width}px`;
-      panel.style.left = `${Math.max(margin, Math.min(anchor.left, window.innerWidth - width - margin))}px`;
+      panel.style.left = `${Math.max(margin, Math.min(
+        galleryRect.left + (galleryRect.width - width) / 2,
+        window.innerWidth - width - margin,
+      ))}px`;
       panel.style.top = `${anchor.bottom + 6}px`;
       requestAnimationFrame(() => {
         const panelRect = panel.getBoundingClientRect();
@@ -1184,8 +1228,15 @@
     dropdown.addEventListener('toggle', () => {
       if (!dropdown.open) {
         window.removeEventListener('resize', positionPanel);
+        panel.hidden = true;
+        dropdown.appendChild(panel);
         return;
       }
+      root.querySelectorAll('.gp-external-sources[open], .gp-file-types[open]').forEach((other) => {
+        if (other !== dropdown) other.open = false;
+      });
+      document.body.appendChild(panel);
+      panel.hidden = false;
       const folder = getGalleryFolder(root);
       textarea.value = getExternalSources(folder).join('\n');
       status.textContent = folder ? '' : 'Choose a gallery folder first.';
@@ -1237,6 +1288,180 @@
     else topBar.appendChild(dropdown);
   }
   
+  function installFileTypeFilterControl(root, sortSelect) {
+    const folderInput = root.querySelector('.gallery-folder-input');
+    const topBar = folderInput?.parentElement;
+    if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-file-types')) return;
+  
+    const dropdown = document.createElement('details');
+    dropdown.className = 'gp-file-types';
+  
+    const summary = document.createElement('summary');
+    summary.className = 'right_menu_button fa-solid fa-filter fa-fw gp-file-types-button';
+    summary.title = 'Choose gallery and slideshow file types';
+    summary.setAttribute('aria-label', summary.title);
+    dropdown.appendChild(summary);
+  
+    const panel = document.createElement('div');
+    panel.className = 'gp-file-types-panel';
+  
+    const heading = document.createElement('strong');
+    heading.textContent = 'Visible file types';
+    panel.appendChild(heading);
+  
+    const groups = document.createElement('div');
+    groups.className = 'gp-file-types-groups';
+    const inputs = new Map();
+    for (const [name, types] of [['Images', IMAGE_FILE_TYPES], ['Videos', VIDEO_FILE_TYPES]]) {
+      const fieldset = document.createElement('fieldset');
+      const legend = document.createElement('legend');
+      legend.textContent = name;
+      fieldset.appendChild(legend);
+      types.forEach((type) => {
+        const label = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = type;
+        input.className = 'gp-file-type-checkbox';
+        label.appendChild(input);
+        label.append(` .${type}`);
+        inputs.set(type, input);
+        fieldset.appendChild(label);
+      });
+      groups.appendChild(fieldset);
+    }
+    panel.appendChild(groups);
+  
+    const status = document.createElement('div');
+    status.className = 'gp-file-types-status';
+    status.setAttribute('aria-live', 'polite');
+    panel.appendChild(status);
+  
+    const actions = document.createElement('div');
+    actions.className = 'gp-file-types-actions';
+    const allButton = document.createElement('button');
+    allButton.type = 'button';
+    allButton.className = 'menu_button';
+    allButton.textContent = 'All';
+    const noneButton = document.createElement('button');
+    noneButton.type = 'button';
+    noneButton.className = 'menu_button';
+    noneButton.textContent = 'None';
+    const applyButton = document.createElement('button');
+    applyButton.type = 'button';
+    applyButton.className = 'menu_button gp-file-types-apply';
+    applyButton.textContent = 'Apply';
+    actions.append(allButton, noneButton, applyButton);
+    panel.appendChild(actions);
+    dropdown.appendChild(panel);
+  
+    const updateStatus = () => {
+      const count = [...inputs.values()].filter(input => input.checked).length;
+      status.textContent = `${count} of ${SUPPORTED_FILE_TYPES.length} file types selected`;
+    };
+    const setAll = (checked) => {
+      inputs.forEach(input => { input.checked = checked; });
+      updateStatus();
+    };
+    const positionPanel = () => {
+      const anchor = summary.getBoundingClientRect();
+      const galleryRect = root.getBoundingClientRect();
+      const margin = 8;
+      const width = Math.min(420, window.innerWidth - margin * 2, Math.max(240, galleryRect.width - margin * 2));
+      panel.style.width = `${width}px`;
+      panel.style.left = `${Math.max(margin, Math.min(
+        galleryRect.left + (galleryRect.width - width) / 2,
+        window.innerWidth - width - margin,
+      ))}px`;
+      panel.style.top = `${anchor.bottom + 6}px`;
+      requestAnimationFrame(() => {
+        const panelRect = panel.getBoundingClientRect();
+        if (panelRect.bottom > window.innerHeight - margin && anchor.top > panelRect.height + margin) {
+          panel.style.top = `${anchor.top - panelRect.height - 6}px`;
+        }
+      });
+    };
+  
+    dropdown.addEventListener('toggle', () => {
+      if (!dropdown.open) {
+        window.removeEventListener('resize', positionPanel);
+        panel.hidden = true;
+        dropdown.appendChild(panel);
+        return;
+      }
+      root.querySelectorAll('.gp-external-sources[open], .gp-file-types[open]').forEach((other) => {
+        if (other !== dropdown) other.open = false;
+      });
+      document.body.appendChild(panel);
+      panel.hidden = false;
+      const folder = getGalleryFolder(root);
+      const enabled = new Set(getEnabledFileTypes(folder));
+      inputs.forEach((input, type) => { input.checked = enabled.has(type); });
+      updateStatus();
+      positionPanel();
+      window.addEventListener('resize', positionPanel);
+    });
+    panel.addEventListener('click', event => event.stopPropagation());
+    inputs.forEach(input => input.addEventListener('change', updateStatus));
+    allButton.addEventListener('click', () => setAll(true));
+    noneButton.addEventListener('click', () => setAll(false));
+    applyButton.addEventListener('click', () => {
+      const folder = getGalleryFolder(root);
+      if (!folder) {
+        notify('error', 'Choose a gallery folder first.');
+        return;
+      }
+      const enabled = SUPPORTED_FILE_TYPES.filter(type => inputs.get(type)?.checked);
+      saveEnabledFileTypes(folder, enabled);
+      dropdown.open = false;
+      notify('success', `Showing ${enabled.length} of ${SUPPORTED_FILE_TYPES.length} file types.`);
+      refreshGallery(sortSelect);
+    });
+  
+    const externalSources = topBar.querySelector('.gp-external-sources');
+    if (externalSources) externalSources.insertAdjacentElement('afterend', dropdown);
+    else topBar.appendChild(dropdown);
+  }
+  
+  function getEnabledFileTypes(folder) {
+    const filters = gpSettings().fileTypeFilters;
+    if (!folder || !filters || !Object.prototype.hasOwnProperty.call(filters, folder)) {
+      return [...SUPPORTED_FILE_TYPES];
+    }
+    const stored = filters[folder];
+    if (!Array.isArray(stored)) return [...SUPPORTED_FILE_TYPES];
+    const enabled = new Set(stored.map(type => String(type).toLowerCase()));
+    return SUPPORTED_FILE_TYPES.filter(type => enabled.has(type));
+  }
+  
+  function saveEnabledFileTypes(folder, enabled) {
+    if (!folder) return;
+    const fileTypeFilters = { ...(gpSettings().fileTypeFilters || {}), [folder]: [...enabled] };
+    gpSaveSettings({ fileTypeFilters });
+  }
+  
+  function areAllFileTypesEnabled(folder) {
+    return getEnabledFileTypes(folder).length === SUPPORTED_FILE_TYPES.length;
+  }
+  
+  function getFileExtension(file) {
+    try {
+      const pathname = new URL(String(file), location.href).pathname;
+      const name = decodeURIComponent(pathname.split('/').pop() || '');
+      const dot = name.lastIndexOf('.');
+      return dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
+    } catch {
+      const clean = String(file).split(/[?#]/, 1)[0];
+      const dot = clean.lastIndexOf('.');
+      return dot >= 0 ? clean.slice(dot + 1).toLowerCase() : '';
+    }
+  }
+  
+  function filterFilesByType(folder, files) {
+    const enabled = new Set(getEnabledFileTypes(folder));
+    return files.filter(file => enabled.has(getFileExtension(file)));
+  }
+  
   function getExternalSources(folder) {
     const stored = gpSettings().externalSources?.[folder];
     return Array.isArray(stored) ? stored.filter(source => typeof source === 'string' && source.trim()) : [];
@@ -1273,7 +1498,7 @@
     try {
       const url = new URL(String(item?.url || ''), location.origin);
       if (url.origin !== location.origin || !url.pathname.startsWith(EXTERNAL_FILE_PREFIX)) return '';
-      const name = decodeURIComponent(url.pathname.split('/').pop() || String(item?.name || ''));
+      const name = String(item?.name || decodeURIComponent(url.pathname.split('/').pop() || ''));
       const galleryPath = `../../..${url.pathname}${url.search}`;
       if (name) externalEntriesByName.set(name, galleryPath);
       return galleryPath;
@@ -1433,7 +1658,7 @@
       const placeAfter = event.clientX > rect.left + rect.width / 2;
       const reordered = reorderFiles(order, dragged, target, placeAfter);
       if (sameList(order, reordered)) return;
-      saveStoredOrder(folder, reordered);
+      saveVisibleStoredOrder(folder, reordered);
       setGallerySort(CUSTOM_SORT);
       sortSelect.value = CUSTOM_SORT;
       refreshGallery(sortSelect);
@@ -1518,16 +1743,41 @@
     gpSaveSettings({ customOrders });
   }
   
+  function saveVisibleStoredOrder(folder, visibleOrder) {
+    if (areAllFileTypesEnabled(folder)) {
+      saveStoredOrder(folder, visibleOrder);
+      return;
+    }
+  
+    const stored = gpSettings().customOrders?.[folder];
+    if (!Array.isArray(stored)) {
+      saveStoredOrder(folder, visibleOrder);
+      return;
+    }
+    const visible = new Set(visibleOrder);
+    const queue = [...visibleOrder];
+    const merged = stored.map(item => (visible.has(item) ? queue.shift() : item));
+    merged.push(...queue);
+    saveStoredOrder(folder, merged);
+  }
+  
   function removeFromStoredOrder(folder, filename) {
     const current = gpSettings().customOrders?.[folder];
     if (!Array.isArray(current)) return;
     saveStoredOrder(folder, current.filter(item => item !== filename));
   }
   
-  function applyStoredOrder(folder, files) {
+  function applyStoredOrder(folder, files, preserveHidden = false) {
     const order = getStoredOrder(folder, files);
     const stored = gpSettings().customOrders?.[folder];
-    if (!Array.isArray(stored) || !sameList(stored, order)) {
+    if (preserveHidden) {
+      if (!Array.isArray(stored)) saveStoredOrder(folder, order);
+      else {
+        const included = new Set(stored);
+        const added = files.filter(file => !included.has(file));
+        if (added.length) saveStoredOrder(folder, [...stored, ...added]);
+      }
+    } else if (!Array.isArray(stored) || !sameList(stored, order)) {
       saveStoredOrder(folder, order);
     }
     return order;

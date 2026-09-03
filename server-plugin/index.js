@@ -175,7 +175,7 @@ async function collectExternalMedia(sources) {
     const name = path.basename(filePath);
     return {
       name,
-      url: `/api/plugins/galleryplus/external-media/file/${token}/${encodeURIComponent(name)}`,
+      url: `/api/plugins/galleryplus/external-media/file/${token}${path.extname(name).toLowerCase()}`,
     };
   });
   return { items, errors };
@@ -292,8 +292,8 @@ async function init(router) {
     }
   });
 
-  router.get('/external-media/file/:token/:name', async (request, response) => {
-    const token = String(request.params?.token || '');
+  const serveExternalMedia = async (tokenValue, response) => {
+    const token = String(tokenValue || '');
     const filePath = externalMediaFiles.get(token);
     if (!/^[a-f0-9]{64}$/.test(token) || !filePath || !isUsableMediaFile(filePath)) {
       return response.sendStatus(404);
@@ -302,6 +302,17 @@ async function init(router) {
     if (!stat?.isFile()) return response.sendStatus(404);
     response.set('Cache-Control', 'no-store');
     return response.sendFile(filePath);
+  };
+
+  router.get('/external-media/file/:tokenFile', async (request, response) => {
+    const match = String(request.params?.tokenFile || '').match(/^([a-f0-9]{64})\.[a-z0-9]+$/i);
+    if (!match) return response.sendStatus(404);
+    return serveExternalMedia(match[1].toLowerCase(), response);
+  });
+
+  // Keep links created by GalleryPlus 0.80 working until the gallery refreshes.
+  router.get('/external-media/file/:token/:name', async (request, response) => {
+    return serveExternalMedia(request.params?.token, response);
   });
 
   console.log('[GalleryPlus] Server plugin loaded');
@@ -324,6 +335,7 @@ module.exports = {
   CAPABILITIES,
   FRONTEND_FILES,
   syncFrontendFiles,
+  normalizeSourceAddress,
   collectExternalMedia,
   externalMediaFiles,
 };

@@ -20,4 +20,4 @@ The UI uses `/api/plugins/galleryplus/archive` when Remove mode is active and
 Both routes restrict requests to a single gallery folder beneath the current
 user's images directory. The external-media routes accept saved file/folder
 addresses, recursively list recognized image/video types, and serve only files
-registered by that listing request through unguessable path tokens.
+registered by that listing request through unguessable `token.extension` URLs.

@@ -1,6 +1,8 @@
 import { gpSettings, gpSaveSettings } from './settings.js';
 import { isVideoSource, transitionTo } from './transitions.js';
 
+const GALLERY_FILE_TYPES = ['bmp', 'gif', 'jfif', 'jpeg', 'jpg', 'png', 'webp', 'mov', 'mp4', 'webm'];
+
 export function wireViewer(root) {
   if (!root || root.dataset.gpWired === '1') return;
 
@@ -82,15 +84,16 @@ function injectLeftControls(root, pcBar) {
   prevBtn.appendChild(prevIcon);
   prevBtn.addEventListener('click', () => stepSlideshow(-1));
 
-  // ⏯️ start/pause slideshow
+  // ▶️/⏸️ start/pause slideshow
   const playBtn = document.createElement('button');
   playBtn.className = 'gp-btn gp-play';
-  const playTip = 'Start / pause slideshow (Ctrl+Space)';
+  const playTip = 'Play slideshow (Ctrl+Space)';
   playBtn.title = playTip;
   playBtn.setAttribute('aria-label', playTip);
+  playBtn.setAttribute('aria-pressed', 'false');
   const playIcon = document.createElement('span');
   playIcon.setAttribute('aria-hidden', 'true');
-  playIcon.textContent = '⏯️';
+  playIcon.textContent = '▶️';
   playBtn.appendChild(playIcon);
   playBtn.addEventListener('click', () => {
     if (root.dataset.gpPlaying === '1') stopSlideshow(root);
@@ -266,6 +269,7 @@ function injectLeftControls(root, pcBar) {
   left.appendChild(speedWrap);
   left.appendChild(videoLoopWrap);
   left.appendChild(sel);
+  updateSlideshowButton(root);
 }
 function saveDefaultRect(root) {
   const st = root.style;
@@ -432,13 +436,28 @@ function wireFullscreenStateSync(root) {
 
 function startSlideshow(root) {
   root.dataset.gpPlaying = '1';
+  updateSlideshowButton(root);
   scheduleCurrentMedia(root, false);
 }
 function stopSlideshow(root) {
   root.dataset.gpPlaying = '0';
+  updateSlideshowButton(root);
   clearSlideshowTimer(root);
   const media = currentMedia(root);
   if (media instanceof HTMLVideoElement) media.pause();
+}
+
+function updateSlideshowButton(root) {
+  const button = root.querySelector('.gp-play');
+  if (!(button instanceof HTMLButtonElement)) return;
+  const playing = root.dataset.gpPlaying === '1';
+  const label = playing ? 'Pause slideshow (Ctrl+Space)' : 'Play slideshow (Ctrl+Space)';
+  button.classList.toggle('active', playing);
+  button.setAttribute('aria-pressed', String(playing));
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  const icon = button.querySelector('[aria-hidden="true"]');
+  if (icon) icon.textContent = playing ? '⏸️' : '▶️';
 }
 
 function clearSlideshowTimer(root) {
@@ -652,7 +671,7 @@ async function fetchGalleryList(root) {
           type: 0b011,
         }),
       });
-      if (!response.ok) return await fetchGalleryListFromCommand(context);
+      if (!response.ok) return await fetchGalleryListFromCommand(context, root._gpGalleryFolder);
 
       const files = await response.json();
       if (!Array.isArray(files)) return null;
@@ -662,10 +681,10 @@ async function fetchGalleryList(root) {
     }
   }
 
-  return await fetchGalleryListFromCommand(context);
+  return await fetchGalleryListFromCommand(context, root._gpGalleryFolder);
 }
 
-async function fetchGalleryListFromCommand(context) {
+async function fetchGalleryListFromCommand(context, folder = '') {
   if (typeof context?.executeSlashCommandsWithOptions !== 'function') return null;
 
   try {
@@ -676,10 +695,25 @@ async function fetchGalleryListFromCommand(context) {
     });
     const value = result?.pipe;
     const items = Array.isArray(value) ? value : JSON.parse(value);
-    return Array.isArray(items) ? normalizeGalleryUrls(items) : null;
+    return Array.isArray(items) ? filterGalleryUrls(folder, normalizeGalleryUrls(items)) : null;
   } catch {
     return null;
   }
+}
+
+function filterGalleryUrls(folder, items) {
+  const filters = gpSettings().fileTypeFilters;
+  if (!folder || !filters || !Object.prototype.hasOwnProperty.call(filters, folder)) return items;
+  const stored = Array.isArray(filters[folder]) ? filters[folder] : GALLERY_FILE_TYPES;
+  const enabled = new Set(stored.map(type => String(type).toLowerCase()));
+  return items.filter((item) => {
+    try {
+      const name = decodeURIComponent(new URL(item, location.href).pathname.split('/').pop() || '');
+      return enabled.has(name.split('.').pop()?.toLowerCase());
+    } catch {
+      return false;
+    }
+  });
 }
 
 function getSillyTavernContext() {
