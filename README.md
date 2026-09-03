@@ -16,6 +16,7 @@ custom image ordering, and safe gallery organization.
 - Safe Remove mode that moves files to `<gallery folder>/deprecated`
 - A gallery control that opens the current source folder in Windows Explorer
 - Per-gallery external file/folder addresses, including supported media in nested folders
+- Non-blocking external-folder loading that keeps the gallery open while large folders populate
 - Per-gallery file-type filters shared by the thumbnail view and slideshow
 - Scroll-wheel or hover zoom and click-and-drag panning
 
@@ -64,6 +65,8 @@ Files and Folders window. Enter one full file or folder address per line, then c
 recursively for supported image and video files. The addresses are saved for
 the current gallery folder, while the original files stay in place. To remove
 an external item from the gallery, edit or remove its address from this list.
+Large folders are scanned in the background: the gallery opens immediately with
+available items and updates in place as soon as the external scan completes.
 
 ## Filtering file types
 

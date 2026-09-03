@@ -1012,9 +1012,21 @@
   const IMAGE_FILE_TYPES = ['bmp', 'gif', 'jfif', 'jpeg', 'jpg', 'png', 'webp'];
   const VIDEO_FILE_TYPES = ['mov', 'mp4', 'webm'];
   const SUPPORTED_FILE_TYPES = [...IMAGE_FILE_TYPES, ...VIDEO_FILE_TYPES];
+  const EXTERNAL_CACHE_TTL_MS = 2500;
+  const EXTERNAL_STATUS_EVENT = 'galleryplus:external-media-status';
+  const VIDEO_THUMBNAIL = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent([
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 150">',
+    '<rect width="240" height="150" fill="#171717"/>',
+    '<path d="M96 46v58l53-29z" fill="#eee"/>',
+    '</svg>',
+  ].join(''));
   let archiveModeActive = false;
   let fetchHookInstalled = false;
+  let externalItemSequence = 0;
   const externalEntriesByName = new Map();
+  const externalMediaCache = new Map();
+  const externalMediaLoads = new Map();
+  const externalMediaStatus = new Map();
   
   function installCustomOrderFetchHook() {
     if (fetchHookInstalled) return;
@@ -1056,15 +1068,16 @@
         const augmented = files.map(String);
         const sources = getExternalSources(folder);
         if (sources.length) {
-          try {
-            const external = await fetchExternalMedia(sources, nativeFetch);
-            external.items.forEach((item) => {
-              const galleryPath = externalItemToGalleryPath(item);
-              if (galleryPath && !augmented.includes(galleryPath)) augmented.push(galleryPath);
-            });
-          } catch (error) {
-            console.warn('[GalleryPlus] Could not add external media to gallery', error);
+          const cached = getExternalMediaCache(folder, sources);
+          cached?.items.forEach((item) => {
+            if (item.galleryPath && !augmented.includes(item.galleryPath)) augmented.push(item.galleryPath);
+          });
+          if (!cached || Date.now() - cached.checkedAt >= EXTERNAL_CACHE_TTL_MS) {
+            void loadExternalMediaInBackground(folder, sources, nativeFetch);
           }
+        } else if (externalMediaCache.has(folder)) {
+          externalMediaCache.delete(folder);
+          queueOpenGalleryExternalSync(folder, []);
         }
   
         const filtered = filterFilesByType(folder, augmented);
@@ -1096,11 +1109,18 @@
     root.dataset.gpGalleryWired = '1';
     ensureCustomSortOption(sortSelect);
     installOpenFolderControl(root);
-    installExternalSourcesControl(root, sortSelect);
+    installExternalSourcesControl(root);
     installFileTypeFilterControl(root, sortSelect);
     installArchiveControl(root, gallery, sortSelect);
     installReordering(root, gallery, sortSelect);
     updateCustomOrderHint(root, sortSelect);
+  
+    const folder = getGalleryFolder(root);
+    const sources = getExternalSources(folder);
+    const cached = getExternalMediaCache(folder, sources);
+    if (cached) queueOpenGalleryExternalSync(folder, getVisibleExternalItems(folder, cached.items));
+    const currentStatus = externalMediaStatus.get(folder);
+    if (currentStatus) applyExternalMediaStatus(root, currentStatus);
   
     sortSelect.addEventListener('change', () => updateCustomOrderHint(root, sortSelect));
   }
@@ -1160,7 +1180,7 @@
     else topBar.appendChild(button);
   }
   
-  function installExternalSourcesControl(root, sortSelect) {
+  function installExternalSourcesControl(root) {
     const folderInput = root.querySelector('.gallery-folder-input');
     const topBar = folderInput?.parentElement;
     if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-external-sources-button')) return;
@@ -1232,6 +1252,11 @@
         button.setAttribute('aria-expanded', 'false');
       }
     };
+    const onExternalMediaStatus = (event) => {
+      if (event.detail?.folder !== getGalleryFolder(root)) return;
+      applyExternalMediaStatus(root, event.detail, status);
+    };
+    window.addEventListener(EXTERNAL_STATUS_EVENT, onExternalMediaStatus);
     const openWindow = () => {
       const fileTypes = root.querySelector('.gp-file-types[open]');
       if (fileTypes instanceof HTMLDetailsElement) fileTypes.open = false;
@@ -1272,7 +1297,7 @@
     ['pointerdown', 'mousedown', 'mouseup'].forEach((eventName) => {
       dialog.addEventListener(eventName, event => event.stopPropagation());
     });
-    saveButton.addEventListener('click', async () => {
+    saveButton.addEventListener('click', () => {
       if (saveButton.disabled) return;
       const folder = getGalleryFolder(root);
       if (!folder) {
@@ -1284,30 +1309,22 @@
         .split(/\r?\n/)
         .map(value => value.trim())
         .filter(Boolean))];
-      saveButton.disabled = true;
-      status.textContent = 'Checking addresses…';
       try {
-        const external = await fetchExternalMedia(sources, window.fetch, true);
         saveExternalSources(folder, sources);
-        status.textContent = `${external.items.length} external media file${external.items.length === 1 ? '' : 's'} found.`;
-        if (external.errors.length) {
-          const details = external.errors.slice(0, 3)
-            .map(error => `${error.source}: ${error.message}`)
-            .join('\n');
-          notify('info', `Saved, but ${external.errors.length} address${external.errors.length === 1 ? '' : 'es'} could not be read.\n${details}`);
-        } else {
-          notify('success', 'External gallery sources updated.');
-        }
+        externalMediaCache.delete(folder);
         closeWindow();
-        setTimeout(() => {
-          if (sortSelect.isConnected) refreshGallery(sortSelect);
-        }, 0);
+        if (sources.length) {
+          notify('info', 'External sources saved. Media is loading in the background.');
+          void loadExternalMediaInBackground(folder, sources, window.fetch, true);
+        } else {
+          queueOpenGalleryExternalSync(folder, []);
+          publishExternalMediaStatus(folder, { loading: false, count: 0, errors: [] });
+          notify('success', 'External gallery sources cleared.');
+        }
       } catch (error) {
         console.error('[GalleryPlus] Failed to update external gallery sources', error);
         status.textContent = error?.message || 'Could not read the external sources.';
         notify('error', status.textContent);
-      } finally {
-        saveButton.disabled = false;
       }
     });
   
@@ -1319,6 +1336,7 @@
       if (document.body.contains(root)) return;
       closeWindow();
       dialog.remove();
+      window.removeEventListener(EXTERNAL_STATUS_EVENT, onExternalMediaStatus);
       lifecycleObserver.disconnect();
     });
     lifecycleObserver.observe(document.body, { childList: true, subtree: true });
@@ -1528,6 +1546,170 @@
       items: Array.isArray(payload?.items) ? payload.items : [],
       errors: Array.isArray(payload?.errors) ? payload.errors : [],
     };
+  }
+  
+  function getExternalSourceSignature(sources) {
+    return JSON.stringify(sources);
+  }
+  
+  function getExternalMediaCache(folder, sources) {
+    const cached = externalMediaCache.get(folder);
+    return cached?.signature === getExternalSourceSignature(sources) ? cached : null;
+  }
+  
+  function getVisibleExternalItems(folder, items) {
+    const enabled = new Set(getEnabledFileTypes(folder));
+    return items.filter(item => enabled.has(getFileExtension(item.galleryPath)));
+  }
+  
+  function publishExternalMediaStatus(folder, detail) {
+    const next = { folder, ...detail };
+    externalMediaStatus.set(folder, next);
+    window.dispatchEvent(new CustomEvent(EXTERNAL_STATUS_EVENT, { detail: next }));
+  }
+  
+  function applyExternalMediaStatus(root, detail, dialogStatus = null) {
+    const button = root.querySelector('.gp-external-sources-button');
+    if (!(button instanceof HTMLElement)) return;
+    button.classList.toggle('gp-busy', Boolean(detail.loading));
+    button.setAttribute('aria-busy', String(Boolean(detail.loading)));
+    button.title = detail.loading
+      ? 'External media is loading in the background'
+      : 'Open external files and folders';
+  
+    if (!(dialogStatus instanceof HTMLElement)) return;
+    if (detail.loading) {
+      dialogStatus.textContent = 'Loading media in the background…';
+    } else if (detail.error) {
+      dialogStatus.textContent = detail.error;
+    } else {
+      dialogStatus.textContent = `${detail.count ?? 0} external media file${detail.count === 1 ? '' : 's'} found.`;
+    }
+  }
+  
+  async function loadExternalMediaInBackground(folder, sources, fetchImpl, diagnose = false) {
+    const signature = getExternalSourceSignature(sources);
+    const loadKey = `${folder}\n${signature}`;
+    let load = externalMediaLoads.get(loadKey);
+  
+    if (!load) {
+      publishExternalMediaStatus(folder, { loading: true });
+      load = (async () => {
+        try {
+          const external = await fetchExternalMedia(sources, fetchImpl, true);
+          if (getExternalSourceSignature(getExternalSources(folder)) !== signature) return null;
+          const items = external.items.map(item => ({
+            ...item,
+            galleryPath: externalItemToGalleryPath(item),
+          })).filter(item => item.galleryPath);
+          const cached = { signature, checkedAt: Date.now(), items, errors: external.errors };
+          externalMediaCache.set(folder, cached);
+          const visibleItems = getVisibleExternalItems(folder, items);
+          queueOpenGalleryExternalSync(folder, visibleItems);
+          publishExternalMediaStatus(folder, {
+            loading: false,
+            count: visibleItems.length,
+            errors: external.errors,
+          });
+          return cached;
+        } catch (error) {
+          console.warn('[GalleryPlus] Could not add external media to gallery', error);
+          if (getExternalSourceSignature(getExternalSources(folder)) === signature) {
+            publishExternalMediaStatus(folder, {
+              loading: false,
+              error: error?.message || 'Could not read the external sources.',
+            });
+          }
+          return null;
+        } finally {
+          externalMediaLoads.delete(loadKey);
+        }
+      })();
+      externalMediaLoads.set(loadKey, load);
+    }
+  
+    const result = await load;
+    if (diagnose) reportExternalMediaResult(result);
+    return result;
+  }
+  
+  function reportExternalMediaResult(result) {
+    if (!result) {
+      notify('error', 'Could not read the external sources.');
+      return;
+    }
+    if (result.errors.length) {
+      const details = result.errors.slice(0, 3)
+        .map(error => `${error.source}: ${error.message}`)
+        .join('\n');
+      notify('info', `Loaded ${result.items.length} media files, but ${result.errors.length} address${result.errors.length === 1 ? '' : 'es'} could not be read.\n${details}`);
+    } else {
+      notify('success', `${result.items.length} external media file${result.items.length === 1 ? '' : 's'} loaded.`);
+    }
+  }
+  
+  function queueOpenGalleryExternalSync(folder, items, attempt = 0) {
+    setTimeout(() => {
+      if (syncOpenGalleryExternalMedia(folder, items)) return;
+      const matchingGallery = [...document.querySelectorAll('#gallery')]
+        .some(root => root instanceof HTMLElement && getGalleryFolder(root) === folder);
+      if (matchingGallery && attempt < 20) {
+        queueOpenGalleryExternalSync(folder, items, attempt + 1);
+      }
+    }, attempt === 0 ? 0 : 100);
+  }
+  
+  function syncOpenGalleryExternalMedia(folder, items) {
+    const root = [...document.querySelectorAll('#gallery')]
+      .find(element => element instanceof HTMLElement && getGalleryFolder(element) === folder);
+    const gallery = root?.querySelector('#dragGallery');
+    const jq = window.jQuery || window.$;
+    const itemFactory = window.NGY2Item;
+    if (!(gallery instanceof HTMLElement) || typeof jq !== 'function' || typeof itemFactory?.New !== 'function') {
+      return false;
+    }
+  
+    try {
+      const galleryApi = jq(gallery);
+      const data = galleryApi.nanogallery2('data');
+      const instance = galleryApi.nanogallery2('instance');
+      if (!Array.isArray(data?.items) || !instance) return false;
+  
+      const desired = new Map(items.map(item => [item.galleryPath, item]));
+      const existing = new Map();
+      [...data.items].forEach((item) => {
+        const filename = filenameFromGalleryItem(item);
+        if (isExternalGalleryPath(filename)) existing.set(filename, item);
+      });
+  
+      let changed = false;
+      existing.forEach((item, filename) => {
+        if (desired.has(filename)) return;
+        if (typeof item.delete === 'function') {
+          item.delete();
+          changed = true;
+        }
+      });
+  
+      desired.forEach((item, filename) => {
+        if (existing.has(filename)) return;
+        const mediaUrl = new URL(String(item.url), location.origin).href;
+        const extension = getFileExtension(filename);
+        const isVideo = VIDEO_FILE_TYPES.includes(extension);
+        const id = `gp-external-${Date.now()}-${externalItemSequence++}`;
+        const newItem = itemFactory.New(instance, String(item.name || ''), '', id, '0', 'image', '');
+        newItem.thumbSet(isVideo ? VIDEO_THUMBNAIL : mediaUrl, 240, 150);
+        newItem.setMediaURL(mediaUrl, isVideo ? 'video' : 'img');
+        newItem.addToGOM();
+        changed = true;
+      });
+  
+      if (changed) galleryApi.nanogallery2('resize');
+      return true;
+    } catch (error) {
+      console.warn('[GalleryPlus] Could not update the open gallery in place', error);
+      return false;
+    }
   }
   
   function externalItemToGalleryPath(item) {
@@ -1741,16 +1923,18 @@
     }
   }
   
+  function filenameFromGalleryItem(item) {
+    const source = typeof item?.responsiveURL === 'function' ? item.responsiveURL() : item?.src;
+    return filenameFromSource(source);
+  }
+  
   function readGalleryFilenames() {
     const jq = window.jQuery || window.$;
     if (typeof jq !== 'function') return [];
     try {
       const items = jq('#dragGallery').nanogallery2('data')?.items;
       if (!Array.isArray(items)) return [];
-      return items.map(item => {
-        const source = typeof item?.responsiveURL === 'function' ? item.responsiveURL() : item?.src;
-        return filenameFromSource(source);
-      }).filter(Boolean);
+      return items.map(filenameFromGalleryItem).filter(Boolean);
     } catch {
       return [];
     }

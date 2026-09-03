@@ -142,6 +142,14 @@
 .gp-external-sources-button.active {
   box-shadow: 0 0 0 2px var(--SmartThemeUnderlineColor, #7aa2f7) inset;
 }
+.gp-external-sources-button.gp-busy {
+  color: var(--SmartThemeUnderlineColor, #7aa2f7);
+  animation: gp-external-source-pulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes gp-external-source-pulse {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
 .gp-external-sources-window {
   position: fixed;
   inset: 0;
