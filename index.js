@@ -1266,7 +1266,11 @@
       closeWindow();
     });
     dialog.addEventListener('click', (event) => {
+      event.stopPropagation();
       if (event.target === dialog) closeWindow();
+    });
+    ['pointerdown', 'mousedown', 'mouseup'].forEach((eventName) => {
+      dialog.addEventListener(eventName, event => event.stopPropagation());
     });
     saveButton.addEventListener('click', async () => {
       if (saveButton.disabled) return;
@@ -1295,7 +1299,9 @@
           notify('success', 'External gallery sources updated.');
         }
         closeWindow();
-        refreshGallery(sortSelect);
+        setTimeout(() => {
+          if (sortSelect.isConnected) refreshGallery(sortSelect);
+        }, 0);
       } catch (error) {
         console.error('[GalleryPlus] Failed to update external gallery sources', error);
         status.textContent = error?.message || 'Could not read the external sources.';
