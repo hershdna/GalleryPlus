@@ -160,23 +160,40 @@ function installOpenFolderControl(root) {
 function installExternalSourcesControl(root, sortSelect) {
   const folderInput = root.querySelector('.gallery-folder-input');
   const topBar = folderInput?.parentElement;
-  if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-external-sources')) return;
+  if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-external-sources-button')) return;
 
-  const dropdown = document.createElement('details');
-  dropdown.className = 'gp-external-sources';
+  const button = document.createElement('div');
+  button.className = 'right_menu_button fa-solid fa-link fa-fw gp-external-sources-button';
+  button.title = 'Open external files and folders';
+  button.setAttribute('role', 'button');
+  button.setAttribute('aria-label', button.title);
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('tabindex', '0');
 
-  const summary = document.createElement('summary');
-  summary.className = 'right_menu_button fa-solid fa-link fa-fw gp-external-sources-button';
-  summary.title = 'Add external files and folders';
-  summary.setAttribute('aria-label', summary.title);
-  dropdown.appendChild(summary);
+  const dialog = document.createElement('dialog');
+  dialog.className = 'gp-external-sources-window';
+  dialog.setAttribute('aria-labelledby', 'gp-external-sources-title');
 
   const panel = document.createElement('div');
   panel.className = 'gp-external-sources-panel';
 
+  const header = document.createElement('div');
+  header.className = 'gp-external-sources-header';
+  const heading = document.createElement('strong');
+  heading.id = 'gp-external-sources-title';
+  heading.textContent = 'External files and folders';
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'gp-external-sources-close';
+  closeButton.title = 'Close';
+  closeButton.setAttribute('aria-label', 'Close external files and folders');
+  closeButton.textContent = '×';
+  header.append(heading, closeButton);
+  panel.appendChild(header);
+
   const label = document.createElement('label');
   label.className = 'gp-external-sources-label';
-  label.textContent = 'External files and folders';
+  label.textContent = 'One address per line';
 
   const textarea = document.createElement('textarea');
   textarea.className = 'gp-external-sources-input text_pole';
@@ -201,48 +218,53 @@ function installExternalSourcesControl(root, sortSelect) {
   saveButton.className = 'menu_button gp-external-sources-save';
   saveButton.textContent = 'Apply';
   panel.appendChild(saveButton);
-  dropdown.appendChild(panel);
+  dialog.appendChild(panel);
+  document.body.appendChild(dialog);
 
-  const positionPanel = () => {
-    const anchor = summary.getBoundingClientRect();
-    const galleryRect = root.getBoundingClientRect();
-    const margin = 8;
-    const width = Math.min(420, window.innerWidth - margin * 2, Math.max(240, galleryRect.width - margin * 2));
-    panel.style.width = `${width}px`;
-    panel.style.left = `${Math.max(margin, Math.min(
-      galleryRect.left + (galleryRect.width - width) / 2,
-      window.innerWidth - width - margin,
-    ))}px`;
-    panel.style.top = `${anchor.bottom + 6}px`;
-    requestAnimationFrame(() => {
-      const panelRect = panel.getBoundingClientRect();
-      if (panelRect.bottom > window.innerHeight - margin && anchor.top > panelRect.height + margin) {
-        panel.style.top = `${anchor.top - panelRect.height - 6}px`;
-      }
-    });
-  };
-
-  dropdown.addEventListener('toggle', () => {
-    if (!dropdown.open) {
-      window.removeEventListener('resize', positionPanel);
-      panel.hidden = true;
-      dropdown.appendChild(panel);
-      return;
+  const closeWindow = () => {
+    if (typeof dialog.close === 'function' && dialog.open) dialog.close();
+    else {
+      dialog.removeAttribute('open');
+      button.classList.remove('active');
+      button.setAttribute('aria-expanded', 'false');
     }
-    root.querySelectorAll('.gp-external-sources[open], .gp-file-types[open]').forEach((other) => {
-      if (other !== dropdown) other.open = false;
-    });
-    document.body.appendChild(panel);
-    panel.hidden = false;
+  };
+  const openWindow = () => {
+    const fileTypes = root.querySelector('.gp-file-types[open]');
+    if (fileTypes instanceof HTMLDetailsElement) fileTypes.open = false;
     const folder = getGalleryFolder(root);
     textarea.value = getExternalSources(folder).join('\n');
     status.textContent = folder ? '' : 'Choose a gallery folder first.';
-    positionPanel();
-    window.addEventListener('resize', positionPanel);
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+    button.classList.add('active');
+    button.setAttribute('aria-expanded', 'true');
     requestAnimationFrame(() => textarea.focus());
-  });
+  };
 
-  panel.addEventListener('click', event => event.stopPropagation());
+  button.addEventListener('click', openWindow);
+  button.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openWindow();
+  });
+  closeButton.addEventListener('click', closeWindow);
+  dialog.addEventListener('close', () => {
+    button.classList.remove('active');
+    button.setAttribute('aria-expanded', 'false');
+  });
+  dialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeWindow();
+  });
+  dialog.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    closeWindow();
+  });
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) closeWindow();
+  });
   saveButton.addEventListener('click', async () => {
     if (saveButton.disabled) return;
     const folder = getGalleryFolder(root);
@@ -269,7 +291,7 @@ function installExternalSourcesControl(root, sortSelect) {
       } else {
         notify('success', 'External gallery sources updated.');
       }
-      dropdown.open = false;
+      closeWindow();
       refreshGallery(sortSelect);
     } catch (error) {
       console.error('[GalleryPlus] Failed to update external gallery sources', error);
@@ -281,8 +303,16 @@ function installExternalSourcesControl(root, sortSelect) {
   });
 
   const openFolderButton = topBar.querySelector('.gp-open-folder');
-  if (openFolderButton) openFolderButton.insertAdjacentElement('afterend', dropdown);
-  else topBar.appendChild(dropdown);
+  if (openFolderButton) openFolderButton.insertAdjacentElement('afterend', button);
+  else topBar.appendChild(button);
+
+  const lifecycleObserver = new MutationObserver(() => {
+    if (document.body.contains(root)) return;
+    closeWindow();
+    dialog.remove();
+    lifecycleObserver.disconnect();
+  });
+  lifecycleObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function installFileTypeFilterControl(root, sortSelect) {

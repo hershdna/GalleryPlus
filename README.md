@@ -59,8 +59,8 @@ the server plugin to open that gallery's source directory in Windows Explorer.
 
 ## Adding files from other locations
 
-Click the link control next to the gallery folder field. Enter one full file or
-folder address per line, then click **Apply**. Folder addresses are scanned
+Click the link control next to the gallery folder field to open the External
+Files and Folders window. Enter one full file or folder address per line, then click **Apply**. Folder addresses are scanned
 recursively for supported image and video files. The addresses are saved for
 the current gallery folder, while the original files stay in place. To remove
 an external item from the gallery, edit or remove its address from this list.
