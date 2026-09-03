@@ -9,7 +9,9 @@ const SERVER_HEALTH_ENDPOINT = '/api/plugins/galleryplus/health';
 const IMAGE_FILE_TYPES = ['bmp', 'gif', 'jfif', 'jpeg', 'jpg', 'png', 'webp'];
 const VIDEO_FILE_TYPES = ['mov', 'mp4', 'webm'];
 const SUPPORTED_FILE_TYPES = [...IMAGE_FILE_TYPES, ...VIDEO_FILE_TYPES];
-const EXTERNAL_CACHE_TTL_MS = 2500;
+const EXTERNAL_CACHE_TTL_MS = 5000;
+const EXTERNAL_VALIDATION_BATCH_SIZE = 12;
+const EXTERNAL_MEDIA_TIMEOUT_MS = 10000;
 const EXTERNAL_STATUS_EVENT = 'galleryplus:external-media-status';
 const VIDEO_THUMBNAIL = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent([
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 150">',
@@ -24,6 +26,8 @@ const externalEntriesByName = new Map();
 const externalMediaCache = new Map();
 const externalMediaLoads = new Map();
 const externalMediaStatus = new Map();
+const externalGallerySyncTimers = new Map();
+const externalValidationCache = new Map();
 
 export function installCustomOrderFetchHook() {
   if (fetchHookInstalled) return;
@@ -62,13 +66,10 @@ export function installCustomOrderFetchHook() {
       const files = await response.clone().json();
       if (!Array.isArray(files)) return response;
 
-      const augmented = files.map(String);
+      const localFiles = files.map(String);
       const sources = getExternalSources(folder);
       if (sources.length) {
         const cached = getExternalMediaCache(folder, sources);
-        cached?.items.forEach((item) => {
-          if (item.galleryPath && !augmented.includes(item.galleryPath)) augmented.push(item.galleryPath);
-        });
         if (!cached || Date.now() - cached.checkedAt >= EXTERNAL_CACHE_TTL_MS) {
           void loadExternalMediaInBackground(folder, sources, nativeFetch);
         }
@@ -77,9 +78,12 @@ export function installCustomOrderFetchHook() {
         queueOpenGalleryExternalSync(folder, []);
       }
 
-      const filtered = filterFilesByType(folder, augmented);
+      // External entries must never be returned here. SillyTavern waits for every
+      // returned item (including video thumbnail generation) before creating the
+      // gallery window. They are validated and inserted progressively instead.
+      const filtered = filterFilesByType(folder, localFiles);
       const result = getGallerySort() === CUSTOM_SORT
-        ? applyStoredOrder(folder, filtered, !areAllFileTypesEnabled(folder))
+        ? applyStoredOrder(folder, filtered, sources.length > 0 || !areAllFileTypesEnabled(folder))
         : filtered;
       if (sameList(files.map(String), result)) return response;
       const headers = new Headers(response.headers);
@@ -96,6 +100,12 @@ export function installCustomOrderFetchHook() {
   };
 }
 
+export function getCachedExternalGalleryPaths(folder) {
+  const sources = getExternalSources(folder);
+  const cached = getExternalMediaCache(folder, sources);
+  return cached ? getVisibleExternalItems(folder, cached.items).map(item => item.galleryPath) : [];
+}
+
 export function wireGallery(root) {
   if (!(root instanceof HTMLElement) || root.dataset.gpGalleryWired === '1') return;
 
@@ -110,6 +120,7 @@ export function wireGallery(root) {
   installFileTypeFilterControl(root, sortSelect);
   installArchiveControl(root, gallery, sortSelect);
   installReordering(root, gallery, sortSelect);
+  installFailedMediaHandling(root, gallery);
   updateCustomOrderHint(root, sortSelect);
 
   const folder = getGalleryFolder(root);
@@ -576,7 +587,10 @@ function applyExternalMediaStatus(root, detail, dialogStatus = null) {
 
   if (!(dialogStatus instanceof HTMLElement)) return;
   if (detail.loading) {
-    dialogStatus.textContent = 'Loading media in the background…';
+    const progress = Number.isFinite(detail.checked) && Number.isFinite(detail.total)
+      ? ` ${detail.checked} of ${detail.total} checked; ${detail.count ?? 0} available.`
+      : '';
+    dialogStatus.textContent = `Loading media in the background…${progress}`;
   } else if (detail.error) {
     dialogStatus.textContent = detail.error;
   } else {
@@ -595,20 +609,11 @@ async function loadExternalMediaInBackground(folder, sources, fetchImpl, diagnos
       try {
         const external = await fetchExternalMedia(sources, fetchImpl, true);
         if (getExternalSourceSignature(getExternalSources(folder)) !== signature) return null;
-        const items = external.items.map(item => ({
+        const rawItems = external.items.map(item => ({
           ...item,
           galleryPath: externalItemToGalleryPath(item),
         })).filter(item => item.galleryPath);
-        const cached = { signature, checkedAt: Date.now(), items, errors: external.errors };
-        externalMediaCache.set(folder, cached);
-        const visibleItems = getVisibleExternalItems(folder, items);
-        queueOpenGalleryExternalSync(folder, visibleItems);
-        publishExternalMediaStatus(folder, {
-          loading: false,
-          count: visibleItems.length,
-          errors: external.errors,
-        });
-        return cached;
+        return await validateExternalMediaProgressively(folder, signature, rawItems, external.errors);
       } catch (error) {
         console.warn('[GalleryPlus] Could not add external media to gallery', error);
         if (getExternalSourceSignature(getExternalSources(folder)) === signature) {
@@ -630,6 +635,120 @@ async function loadExternalMediaInBackground(folder, sources, fetchImpl, diagnos
   return result;
 }
 
+async function validateExternalMediaProgressively(folder, signature, rawItems, sourceErrors) {
+  const previous = externalMediaCache.get(folder);
+  const sourcePaths = rawItems.map(item => item.galleryPath);
+  if (previous?.signature === signature
+    && previous.complete
+    && sameList(previous.sourcePaths || [], sourcePaths)) {
+    const cached = { ...previous, checkedAt: Date.now() };
+    externalMediaCache.set(folder, cached);
+    queueOpenGalleryExternalSync(folder, getVisibleExternalItems(folder, cached.items));
+    publishExternalMediaStatus(folder, {
+      loading: false,
+      count: getVisibleExternalItems(folder, cached.items).length,
+      errors: cached.errors,
+    });
+    return cached;
+  }
+
+  const availablePaths = new Set(sourcePaths);
+  const validPaths = new Set((previous?.signature === signature ? previous.items : [])
+    .map(item => item.galleryPath)
+    .filter(path => availablePaths.has(path)));
+  const failed = [];
+
+  for (let start = 0; start < rawItems.length; start += EXTERNAL_VALIDATION_BATCH_SIZE) {
+    if (getExternalSourceSignature(getExternalSources(folder)) !== signature) return null;
+    const batch = rawItems.slice(start, start + EXTERNAL_VALIDATION_BATCH_SIZE);
+    const results = await Promise.all(batch.map(validateExternalMediaItem));
+    batch.forEach((item, index) => {
+      if (results[index]) validPaths.add(item.galleryPath);
+      else {
+        validPaths.delete(item.galleryPath);
+        failed.push({ source: item.name || item.url, message: 'File could not be displayed or played.' });
+      }
+    });
+
+    const items = rawItems.filter(item => validPaths.has(item.galleryPath));
+    const cached = {
+      signature,
+      checkedAt: Date.now(),
+      sourcePaths,
+      items,
+      errors: [...sourceErrors, ...failed],
+      complete: false,
+    };
+    externalMediaCache.set(folder, cached);
+    const visibleItems = getVisibleExternalItems(folder, items);
+    queueOpenGalleryExternalSync(folder, visibleItems);
+    publishExternalMediaStatus(folder, {
+      loading: true,
+      count: visibleItems.length,
+      checked: Math.min(start + batch.length, rawItems.length),
+      total: rawItems.length,
+      errors: cached.errors,
+    });
+    await new Promise(resolve => requestAnimationFrame(resolve));
+  }
+
+  const items = rawItems.filter(item => validPaths.has(item.galleryPath));
+  const cached = {
+    signature,
+    checkedAt: Date.now(),
+    sourcePaths,
+    items,
+    errors: [...sourceErrors, ...failed],
+    complete: true,
+  };
+  externalMediaCache.set(folder, cached);
+  const visibleItems = getVisibleExternalItems(folder, items);
+  queueOpenGalleryExternalSync(folder, visibleItems);
+  publishExternalMediaStatus(folder, {
+    loading: false,
+    count: visibleItems.length,
+    errors: cached.errors,
+  });
+  return cached;
+}
+
+function validateExternalMediaItem(item) {
+  const mediaUrl = new URL(String(item.url), location.origin).href;
+  const cached = externalValidationCache.get(mediaUrl);
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  const isVideo = VIDEO_FILE_TYPES.includes(getFileExtension(item.galleryPath));
+  return new Promise((resolve) => {
+    const media = isVideo ? document.createElement('video') : new Image();
+    let settled = false;
+    const finish = (valid) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      media.onload = null;
+      media.onerror = null;
+      media.onloadedmetadata = null;
+      if (media instanceof HTMLVideoElement) {
+        media.removeAttribute('src');
+        media.load();
+      }
+      externalValidationCache.set(mediaUrl, valid);
+      resolve(valid);
+    };
+    const timeout = setTimeout(() => finish(false), EXTERNAL_MEDIA_TIMEOUT_MS);
+    media.onerror = () => finish(false);
+    if (media instanceof HTMLVideoElement) {
+      media.preload = 'metadata';
+      media.muted = true;
+      media.onloadedmetadata = () => finish(Number.isFinite(media.duration) && media.duration > 0);
+    } else {
+      media.decoding = 'async';
+      media.onload = () => finish(media.naturalWidth > 0 && media.naturalHeight > 0);
+    }
+    media.src = mediaUrl;
+  });
+}
+
 function reportExternalMediaResult(result) {
   if (!result) {
     notify('error', 'Could not read the external sources.');
@@ -639,21 +758,24 @@ function reportExternalMediaResult(result) {
     const details = result.errors.slice(0, 3)
       .map(error => `${error.source}: ${error.message}`)
       .join('\n');
-    notify('info', `Loaded ${result.items.length} media files, but ${result.errors.length} address${result.errors.length === 1 ? '' : 'es'} could not be read.\n${details}`);
+    notify('info', `Loaded ${result.items.length} media files; ${result.errors.length} item${result.errors.length === 1 ? '' : 's'} could not be read or played and were omitted.\n${details}`);
   } else {
     notify('success', `${result.items.length} external media file${result.items.length === 1 ? '' : 's'} loaded.`);
   }
 }
 
 function queueOpenGalleryExternalSync(folder, items, attempt = 0) {
-  setTimeout(() => {
+  if (attempt === 0) clearTimeout(externalGallerySyncTimers.get(folder));
+  const timer = setTimeout(() => {
+    externalGallerySyncTimers.delete(folder);
     if (syncOpenGalleryExternalMedia(folder, items)) return;
     const matchingGallery = [...document.querySelectorAll('#gallery')]
       .some(root => root instanceof HTMLElement && getGalleryFolder(root) === folder);
     if (matchingGallery && attempt < 20) {
       queueOpenGalleryExternalSync(folder, items, attempt + 1);
     }
-  }, attempt === 0 ? 0 : 100);
+  }, attempt === 0 ? 40 : 100);
+  externalGallerySyncTimers.set(folder, timer);
 }
 
 function syncOpenGalleryExternalMedia(folder, items) {
@@ -679,34 +801,81 @@ function syncOpenGalleryExternalMedia(folder, items) {
       if (isExternalGalleryPath(filename)) existing.set(filename, item);
     });
 
-    let changed = false;
+    const operations = [];
     existing.forEach((item, filename) => {
-      if (desired.has(filename)) return;
-      if (typeof item.delete === 'function') {
-        item.delete();
-        changed = true;
+      if (!desired.has(filename) && typeof item.delete === 'function') {
+        operations.push(() => item.delete());
       }
     });
-
     desired.forEach((item, filename) => {
       if (existing.has(filename)) return;
-      const mediaUrl = new URL(String(item.url), location.origin).href;
-      const extension = getFileExtension(filename);
-      const isVideo = VIDEO_FILE_TYPES.includes(extension);
-      const id = `gp-external-${Date.now()}-${externalItemSequence++}`;
-      const newItem = itemFactory.New(instance, String(item.name || ''), '', id, '0', 'image', '');
-      newItem.thumbSet(isVideo ? VIDEO_THUMBNAIL : mediaUrl, 240, 150);
-      newItem.setMediaURL(mediaUrl, isVideo ? 'video' : 'img');
-      newItem.addToGOM();
-      changed = true;
+      operations.push(() => {
+        const mediaUrl = new URL(String(item.url), location.origin).href;
+        const extension = getFileExtension(filename);
+        const isVideo = VIDEO_FILE_TYPES.includes(extension);
+        const id = `gp-external-${Date.now()}-${externalItemSequence++}`;
+        const newItem = itemFactory.New(instance, String(item.name || ''), '', id, '0', 'image', '');
+        newItem.thumbSet(isVideo ? VIDEO_THUMBNAIL : mediaUrl, 240, 150);
+        newItem.setMediaURL(mediaUrl, isVideo ? 'video' : 'img');
+        newItem.addToGOM();
+      });
     });
 
-    if (changed) galleryApi.nanogallery2('resize');
+    const generation = (Number(root._gpExternalSyncGeneration) || 0) + 1;
+    root._gpExternalSyncGeneration = generation;
+    const runBatch = () => {
+      if (!root.isConnected || root._gpExternalSyncGeneration !== generation) return;
+      const batch = operations.splice(0, 24);
+      batch.forEach(operation => operation());
+      if (batch.length) galleryApi.nanogallery2('resize');
+      if (operations.length) setTimeout(runBatch, 0);
+    };
+    runBatch();
     return true;
   } catch (error) {
     console.warn('[GalleryPlus] Could not update the open gallery in place', error);
     return false;
   }
+}
+
+function installFailedMediaHandling(root, gallery) {
+  gallery.addEventListener('error', (event) => {
+    const media = event.target;
+    if (!(media instanceof HTMLImageElement) && !(media instanceof HTMLVideoElement)) return;
+    const galleryPath = filenameFromSource(media.currentSrc || media.src);
+    if (!isExternalGalleryPath(galleryPath)) return;
+    markExternalMediaFailed(getGalleryFolder(root), galleryPath);
+  }, true);
+}
+
+function markExternalMediaFailed(folder, galleryPath) {
+  const cached = externalMediaCache.get(folder);
+  if (!cached?.items.some(item => item.galleryPath === galleryPath)) return;
+  const failedItem = cached.items.find(item => item.galleryPath === galleryPath);
+  if (failedItem?.url) {
+    externalValidationCache.set(new URL(String(failedItem.url), location.origin).href, false);
+  }
+  const items = cached.items.filter(item => item.galleryPath !== galleryPath);
+  const next = {
+    ...cached,
+    items,
+    errors: [...cached.errors, {
+      source: failedItem?.name || galleryPath,
+      message: 'File could not be displayed or played.',
+    }],
+  };
+  externalMediaCache.set(folder, next);
+  queueOpenGalleryExternalSync(folder, getVisibleExternalItems(folder, items));
+  publishExternalMediaStatus(folder, {
+    loading: !next.complete,
+    count: getVisibleExternalItems(folder, items).length,
+    errors: next.errors,
+  });
+}
+
+export function omitFailedExternalMedia(folder, source) {
+  const galleryPath = filenameFromSource(source);
+  if (isExternalGalleryPath(galleryPath)) markExternalMediaFailed(folder, galleryPath);
 }
 
 function externalItemToGalleryPath(item) {

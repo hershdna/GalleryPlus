@@ -1,7 +1,9 @@
 import { gpSettings, gpSaveSettings } from './settings.js';
 import { isVideoSource, transitionTo } from './transitions.js';
+import { getCachedExternalGalleryPaths, omitFailedExternalMedia } from './gallery-controls.js';
 
 const GALLERY_FILE_TYPES = ['bmp', 'gif', 'jfif', 'jpeg', 'jpg', 'png', 'webp', 'mov', 'mp4', 'webm'];
+const MEDIA_LOAD_TIMEOUT_MS = 10000;
 
 export function wireViewer(root) {
   if (!root || root.dataset.gpWired === '1') return;
@@ -517,6 +519,7 @@ function scheduleCurrentMedia(root, resetVideoProgress = true) {
   const media = currentMedia(root);
   if (!media) return;
   root._gpActiveMedia = media;
+  wireMediaFailureHandling(root, media);
 
   if (media instanceof HTMLVideoElement) {
     configureVideo(root, media, resetVideoProgress);
@@ -530,6 +533,56 @@ function scheduleCurrentMedia(root, resetVideoProgress = true) {
     root._gpTimer = null;
     if (root.dataset.gpPlaying === '1') goNext(root);
   }, seconds * 1000);
+}
+
+function wireMediaFailureHandling(root, media) {
+  if (media._gpFailureHandlingWired) return;
+  media._gpFailureHandlingWired = true;
+  let handled = false;
+  let loadConfirmed = false;
+  let metadataTimer = null;
+  const failed = () => {
+    if (handled) return;
+    handled = true;
+    clearTimeout(metadataTimer);
+    if (!media.isConnected || currentMedia(root) !== media) return;
+    const failedUrl = media.currentSrc || media.src;
+    root._gpGalleryList = currentGalleryList(root).filter(item => {
+      try {
+        return new URL(item, location.href).href !== new URL(failedUrl, location.href).href;
+      } catch {
+        return item !== failedUrl;
+      }
+    });
+    omitFailedExternalMedia(root._gpGalleryFolder, failedUrl);
+    if (!root._gpGalleryList.length) {
+      stopSlideshow(root);
+      return;
+    }
+    const nextMedia = transitionTo(root, media, root._gpGalleryList[0]);
+    root._gpActiveMedia = nextMedia;
+    scheduleCurrentMedia(root, true);
+  };
+  media.addEventListener('error', failed, { once: true });
+
+  if (media instanceof HTMLVideoElement) {
+    const validateDuration = () => {
+      clearTimeout(metadataTimer);
+      if (!Number.isFinite(media.duration) || media.duration <= 0) failed();
+      else loadConfirmed = true;
+    };
+    media.addEventListener('loadedmetadata', validateDuration, { once: true });
+    if (media.readyState >= 1) validateDuration();
+  } else if (media.complete) {
+    if (media.naturalWidth > 0) loadConfirmed = true;
+    else failed();
+  } else {
+    media.addEventListener('load', () => {
+      loadConfirmed = true;
+      clearTimeout(metadataTimer);
+    }, { once: true });
+  }
+  if (!handled && !loadConfirmed) metadataTimer = setTimeout(failed, MEDIA_LOAD_TIMEOUT_MS);
 }
 
 function goNext(root) {
@@ -675,7 +728,8 @@ async function fetchGalleryList(root) {
 
       const files = await response.json();
       if (!Array.isArray(files)) return null;
-      return normalizeGalleryUrls(files.map(file => new URL(String(file), root._gpGalleryBaseUrl).href));
+      const allFiles = [...files, ...getCachedExternalGalleryPaths(root._gpGalleryFolder)];
+      return normalizeGalleryUrls(allFiles.map(file => new URL(String(file), root._gpGalleryBaseUrl).href));
     } catch {
       // Fall through to SillyTavern's gallery command for compatibility.
     }

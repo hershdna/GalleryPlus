@@ -300,7 +300,10 @@ async function init(router) {
     }
     const stat = await fs.promises.stat(filePath).catch(() => null);
     if (!stat?.isFile()) return response.sendStatus(404);
-    response.set('Cache-Control', 'no-store');
+    // The browser validates external files before adding them to the gallery.
+    // A short private cache prevents that validation and thumbnail rendering
+    // from reading the same large file twice.
+    response.set('Cache-Control', 'private, max-age=300');
     return response.sendFile(filePath);
   };
 
