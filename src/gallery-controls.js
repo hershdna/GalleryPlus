@@ -120,6 +120,7 @@ export function wireGallery(root) {
   installFileTypeFilterControl(root, sortSelect);
   installArchiveControl(root, gallery, sortSelect);
   installReordering(root, gallery, sortSelect);
+  disableGalleryPageSwipe(root, gallery);
   installFailedMediaHandling(root, gallery);
   updateCustomOrderHint(root, sortSelect);
 
@@ -131,6 +132,34 @@ export function wireGallery(root) {
   if (currentStatus) applyExternalMediaStatus(root, currentStatus);
 
   sortSelect.addEventListener('change', () => updateCustomOrderHint(root, sortSelect));
+}
+
+function disableGalleryPageSwipe(root, gallery, attempt = 0) {
+  if (!root.isConnected) return;
+
+  const jq = window.jQuery;
+  const plugin = typeof jq === 'function' ? jq(gallery)?.data?.('nanogallery2data') : null;
+  const options = plugin?.options;
+  const runtimeOptions = plugin?.nG2?.O;
+  if (options || runtimeOptions) {
+    if (options) {
+      options.paginationSwipe = false;
+      options.galleryNavigationOverlayButtons = false;
+    }
+    if (runtimeOptions) {
+      runtimeOptions.paginationSwipe = false;
+      runtimeOptions.galleryNavigationOverlayButtons = false;
+    }
+    root.dataset.gpPageSwipeDisabled = '1';
+    return;
+  }
+
+  // GalleryPlus can wire the window just before nanogallery finishes starting.
+  // Retry briefly so only the pagination icons change pages; thumbnail clicks
+  // and GalleryPlus drag-to-reorder remain untouched.
+  if (attempt < 50) {
+    setTimeout(() => disableGalleryPageSwipe(root, gallery, attempt + 1), 100);
+  }
 }
 
 function installOpenFolderControl(root) {

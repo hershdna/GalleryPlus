@@ -117,7 +117,7 @@ function injectLeftControls(root, pcBar) {
   // 🔀 randomize slideshow order
   const randomBtn = document.createElement('button');
   randomBtn.className = 'gp-btn gp-random';
-  const randomTip = 'Randomize slideshow order';
+  const randomTip = 'Toggle randomized slideshow order';
   randomBtn.title = randomTip;
   randomBtn.setAttribute('aria-label', randomTip);
   randomBtn.setAttribute('aria-pressed', 'false');
@@ -126,9 +126,9 @@ function injectLeftControls(root, pcBar) {
   randomIcon.textContent = '🔀';
   randomBtn.appendChild(randomIcon);
   randomBtn.addEventListener('click', () => {
-    randomizeGalleryOrder(root);
-    randomBtn.classList.toggle('active', root.dataset.gpRandomized === '1');
-    randomBtn.setAttribute('aria-pressed', String(root.dataset.gpRandomized === '1'));
+    const randomized = toggleRandomizedGalleryOrder(root);
+    randomBtn.classList.toggle('active', randomized);
+    randomBtn.setAttribute('aria-pressed', String(randomized));
   });
 
   // 🔊 globally mute/unmute slideshow videos
@@ -646,9 +646,22 @@ function currentMedia(root) {
   return root.querySelector('.gp-layer.base, :scope > video, :scope > img, .gp-layer.next');
 }
 
-function randomizeGalleryOrder(root) {
+function toggleRandomizedGalleryOrder(root) {
+  if (root.dataset.gpRandomized === '1') {
+    root.dataset.gpRandomized = '0';
+    const canonical = Array.isArray(root._gpCanonicalGalleryList)
+      ? root._gpCanonicalGalleryList
+      : currentGalleryList(root);
+    root._gpGalleryList = [...canonical];
+    return false;
+  }
+
   const list = [...currentGalleryList(root)];
-  if (list.length < 2) return;
+  if (list.length < 2) return false;
+
+  if (!Array.isArray(root._gpCanonicalGalleryList)) {
+    root._gpCanonicalGalleryList = [...list];
+  }
 
   const media = currentMedia(root);
   const currentIndex = media ? indexInList(list, media.src) : -1;
@@ -656,6 +669,7 @@ function randomizeGalleryOrder(root) {
   shuffleInPlace(list);
   root._gpGalleryList = current ? [current, ...list] : list;
   root.dataset.gpRandomized = '1';
+  return true;
 }
 
 function shuffleInPlace(items) {
@@ -669,6 +683,8 @@ function shuffleInPlace(items) {
 function initializeGalleryList(root) {
   const galleryList = readGalleryDataList();
   root._gpGalleryList = galleryList ?? readVisibleGalleryList();
+  root._gpCanonicalGalleryList = [...root._gpGalleryList];
+  root.dataset.gpRandomized = '0';
 
   const folderInput = document.querySelector('#gallery .gallery-folder-input');
   root._gpGalleryFolder = folderInput && 'value' in folderInput
@@ -712,6 +728,7 @@ async function refreshGalleryList(root) {
   const updated = await fetchGalleryList(root);
   if (updated === null) return;
 
+  root._gpCanonicalGalleryList = [...updated];
   const current = Array.isArray(root._gpGalleryList) ? root._gpGalleryList : [];
   const next = root.dataset.gpRandomized === '1'
     ? mergeRandomizedGalleryList(current, updated)

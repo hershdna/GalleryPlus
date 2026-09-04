@@ -7,13 +7,14 @@ custom image ordering, and safe gallery organization.
 
 - Slideshow playback across the complete gallery, including paginated images
 - `.mp4`, `.mov`, and `.webm` gallery items and mixed-media slideshows
-- Previous/next, stateful play/pause and randomize, fullscreen, speed, and Cut/Fade controls
+- Previous/next, stateful play/pause and reversible randomize, fullscreen, speed, and Cut/Fade controls
 - Global video mute and minimum video play-time controls
 - Real video-frame thumbnails and a highlighted slideshow toggle for native video controls
 - Full-image window fitting with black letterboxing instead of cropping
 - Slideshow playback and live image synchronization after the gallery closes
 - Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
 - A **Custom** gallery sort mode with drag-and-drop thumbnail reordering
+- Pagination-icon-only page changes, with page-swipe flipping disabled
 - Safe Remove mode that moves files to `<gallery folder>/deprecated`
 - A gallery control that opens the current source folder in Windows Explorer
 - Per-gallery external file/folder addresses, including supported media in nested folders
