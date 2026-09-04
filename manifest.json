@@ -1,6 +1,6 @@
 {
   "display_name": "GalleryPlus",
-  "version": "0.99",
+  "version": "1.0.0",
   "author": "theFisher86",
   "homePage": "https://github.com/theFisher86/GalleryPlus",
   "loading_order": 9999,
@@ -9,3 +9,4 @@
   "settings": "settings.html",
   "auto_update": true
 }
+
