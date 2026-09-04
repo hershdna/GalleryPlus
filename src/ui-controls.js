@@ -1,4 +1,4 @@
-import { gpSettings, gpSaveSettings } from './settings.js';
+import { FAVORITES_CHANGED_EVENT, gpFavoriteGalleryKey, gpFavoriteIdentity, gpGetFavoriteSet, gpSettings, gpSaveSettings, gpToggleFavorite } from './settings.js';
 import { isVideoSource, transitionTo } from './transitions.js';
 import { getCachedExternalGalleryPaths, omitFailedExternalMedia } from './gallery-controls.js';
 
@@ -816,28 +816,15 @@ function normalizePresentationMode(value) {
 }
 
 function favoriteGalleryKey(root) {
-  return root._gpGalleryFolder || '__default__';
-}
-
-function mediaIdentity(source) {
-  try {
-    const url = new URL(String(source), location.href);
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return String(source || '');
-  }
+  return gpFavoriteGalleryKey(root._gpGalleryFolder);
 }
 
 function getFavoriteSet(root) {
-  const favorites = gpSettings().favoritesByGallery;
-  const entries = favorites && typeof favorites === 'object'
-    ? favorites[favoriteGalleryKey(root)]
-    : null;
-  return new Set(Array.isArray(entries) ? entries.map(String) : []);
+  return gpGetFavoriteSet(root._gpGalleryFolder);
 }
 
 function isFavoriteSource(root, source) {
-  return getFavoriteSet(root).has(mediaIdentity(source));
+  return getFavoriteSet(root).has(gpFavoriteIdentity(source));
 }
 
 function updateFavoriteButton(root) {
@@ -856,21 +843,7 @@ function updateFavoriteButton(root) {
 function toggleCurrentFavorite(root) {
   const media = currentMedia(root);
   if (!media?.src) return;
-  const galleryKey = favoriteGalleryKey(root);
-  const allFavorites = gpSettings().favoritesByGallery;
-  const nextFavorites = allFavorites && typeof allFavorites === 'object'
-    ? { ...allFavorites }
-    : {};
-  const favorites = new Set(Array.isArray(nextFavorites[galleryKey]) ? nextFavorites[galleryKey].map(String) : []);
-  const identity = mediaIdentity(media.src);
-  if (favorites.has(identity)) favorites.delete(identity);
-  else favorites.add(identity);
-  nextFavorites[galleryKey] = [...favorites];
-  gpSaveSettings({ favoritesByGallery: nextFavorites });
-  updateFavoriteButton(root);
-  if (root.dataset.gpPresentationMode === 'favorites') {
-    applyPresentationMode(root, true);
-  }
+  gpToggleFavorite(root._gpGalleryFolder, media.src);
 }
 
 function filterPresentationList(root, sourceList) {
@@ -879,7 +852,7 @@ function filterPresentationList(root, sourceList) {
   if (mode === 'videos') return sourceList.filter(isVideoSource);
   if (mode === 'favorites') {
     const favorites = getFavoriteSet(root);
-    return sourceList.filter(source => favorites.has(mediaIdentity(source)));
+    return sourceList.filter(source => favorites.has(gpFavoriteIdentity(source)));
   }
   return [...sourceList];
 }
@@ -974,6 +947,17 @@ function initializeGalleryList(root) {
   root._gpCanonicalGalleryList = filterPresentationList(root, galleryList);
   root._gpGalleryList = [...root._gpCanonicalGalleryList];
   root.dataset.gpRandomized = '0';
+
+  const onFavoritesChanged = (event) => {
+    if (event.detail?.galleryKey !== favoriteGalleryKey(root)) return;
+    if (!root.isConnected) {
+      document.removeEventListener(FAVORITES_CHANGED_EVENT, onFavoritesChanged);
+      return;
+    }
+    updateFavoriteButton(root);
+    if (root.dataset.gpPresentationMode === 'favorites') applyPresentationMode(root, true);
+  };
+  document.addEventListener(FAVORITES_CHANGED_EVENT, onFavoritesChanged);
 
   const media = currentMedia(root);
   root._gpActiveMedia = media;
@@ -1203,3 +1187,4 @@ function preload(src) {
   i.loading = 'eager';
   i.src = src;
 }
+
