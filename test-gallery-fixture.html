@@ -172,7 +172,16 @@
         return new Response(null, { status: 204 });
       }
       if (path === '/api/plugins/galleryplus/health') {
-        return new Response(JSON.stringify({ ok: true, capabilities: ['archive', 'open-folder', 'external-media'] }), {
+        return new Response(JSON.stringify({ ok: true, capabilities: ['archive', 'open-folder', 'external-media', 'source-folders'] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (path === '/api/plugins/galleryplus/source-folders/list') {
+        document.body.dataset.sourceFoldersRequest = init.body;
+        return new Response(JSON.stringify({
+          folders: ['C:\\Gallery\\Character\\Sets', 'C:\\Gallery\\Character\\Extras'],
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -228,15 +237,21 @@
   </script>
   <script src="/index.js"></script>
   <script>
-    const viewer = document.createElement('div');
-    viewer.className = 'draggable galleryImageDraggable';
-    viewer.style.cssText = 'position:fixed;left:20px;bottom:20px;width:520px;height:360px';
-    viewer.innerHTML = [
-      '<div class="dragTitle">Gallery slideshow</div>',
-      '<div class="panelControlBar"><button class="dragClose">Close</button></div>',
-      '<img src="/images/one.svg" alt="Current slide">',
-    ].join('');
-    document.getElementById('movingDivs').appendChild(viewer);
+    galleryElement.addEventListener('click', (event) => {
+      if (event.target.closest('.gp-thumbnail-favorite')) return;
+      const thumbnail = event.target.closest('.nGY2GThumbnail');
+      if (!thumbnail || document.querySelector('.galleryImageDraggable')) return;
+      const viewer = document.createElement('div');
+      viewer.className = 'draggable galleryImageDraggable';
+      viewer.style.cssText = 'position:fixed;left:20px;bottom:20px;width:520px;height:360px';
+      viewer.innerHTML = [
+        '<div class="dragTitle">Gallery slideshow</div>',
+        '<div class="panelControlBar"><button class="dragClose">Close</button></div>',
+        `<img src="${thumbnail.querySelector('img').src}" alt="Current slide">`,
+      ].join('');
+      document.getElementById('movingDivs').appendChild(viewer);
+      document.body.dataset.thumbnailOpenedSlideshow = '1';
+    });
     document.getElementById('fetch-order').addEventListener('click', async () => {
       const response = await fetch('/api/images/list', {
         method: 'POST',
