@@ -3,6 +3,8 @@
 
   const EXT_ID = 'GalleryPlus';
   
+  const FAVORITES_CHANGED_EVENT = 'galleryplus:favorites-changed';
+  
   const DEFAULTS = {
     enabled: true,
     diag: Date.now(),
@@ -70,6 +72,48 @@
       const merged = { ..._settingsBag(), ...partial };
       localStorage.setItem('GP_SETTINGS', JSON.stringify(merged));
     }
+  }
+  
+  function gpFavoriteGalleryKey(folder = '') {
+    return String(folder || '') || '__default__';
+  }
+  
+  function gpFavoriteIdentity(source) {
+    try {
+      const url = new URL(String(source), location.href);
+      return `${url.pathname}${url.search}`;
+    } catch {
+      return String(source || '');
+    }
+  }
+  
+  function gpGetFavoriteSet(folder = '') {
+    const favorites = gpSettings().favoritesByGallery;
+    const entries = favorites && typeof favorites === 'object'
+      ? favorites[gpFavoriteGalleryKey(folder)]
+      : null;
+    return new Set(Array.isArray(entries) ? entries.map(String) : []);
+  }
+  
+  function gpToggleFavorite(folder, source) {
+    const identity = gpFavoriteIdentity(source);
+    if (!identity) return false;
+  
+    const galleryKey = gpFavoriteGalleryKey(folder);
+    const stored = gpSettings().favoritesByGallery;
+    const favoritesByGallery = stored && typeof stored === 'object' ? { ...stored } : {};
+    const favorites = new Set(Array.isArray(favoritesByGallery[galleryKey])
+      ? favoritesByGallery[galleryKey].map(String)
+      : []);
+    const favorite = !favorites.has(identity);
+    if (favorite) favorites.add(identity);
+    else favorites.delete(identity);
+    favoritesByGallery[galleryKey] = [...favorites];
+    gpSaveSettings({ favoritesByGallery });
+    document.dispatchEvent(new CustomEvent(FAVORITES_CHANGED_EVENT, {
+      detail: { galleryKey, identity, favorite },
+    }));
+    return favorite;
   }
 
   const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm'];
@@ -1016,28 +1060,15 @@
   }
   
   function favoriteGalleryKey(root) {
-    return root._gpGalleryFolder || '__default__';
-  }
-  
-  function mediaIdentity(source) {
-    try {
-      const url = new URL(String(source), location.href);
-      return `${url.pathname}${url.search}`;
-    } catch {
-      return String(source || '');
-    }
+    return gpFavoriteGalleryKey(root._gpGalleryFolder);
   }
   
   function getFavoriteSet(root) {
-    const favorites = gpSettings().favoritesByGallery;
-    const entries = favorites && typeof favorites === 'object'
-      ? favorites[favoriteGalleryKey(root)]
-      : null;
-    return new Set(Array.isArray(entries) ? entries.map(String) : []);
+    return gpGetFavoriteSet(root._gpGalleryFolder);
   }
   
   function isFavoriteSource(root, source) {
-    return getFavoriteSet(root).has(mediaIdentity(source));
+    return getFavoriteSet(root).has(gpFavoriteIdentity(source));
   }
   
   function updateFavoriteButton(root) {
@@ -1056,21 +1087,7 @@
   function toggleCurrentFavorite(root) {
     const media = currentMedia(root);
     if (!media?.src) return;
-    const galleryKey = favoriteGalleryKey(root);
-    const allFavorites = gpSettings().favoritesByGallery;
-    const nextFavorites = allFavorites && typeof allFavorites === 'object'
-      ? { ...allFavorites }
-      : {};
-    const favorites = new Set(Array.isArray(nextFavorites[galleryKey]) ? nextFavorites[galleryKey].map(String) : []);
-    const identity = mediaIdentity(media.src);
-    if (favorites.has(identity)) favorites.delete(identity);
-    else favorites.add(identity);
-    nextFavorites[galleryKey] = [...favorites];
-    gpSaveSettings({ favoritesByGallery: nextFavorites });
-    updateFavoriteButton(root);
-    if (root.dataset.gpPresentationMode === 'favorites') {
-      applyPresentationMode(root, true);
-    }
+    gpToggleFavorite(root._gpGalleryFolder, media.src);
   }
   
   function filterPresentationList(root, sourceList) {
@@ -1079,7 +1096,7 @@
     if (mode === 'videos') return sourceList.filter(isVideoSource);
     if (mode === 'favorites') {
       const favorites = getFavoriteSet(root);
-      return sourceList.filter(source => favorites.has(mediaIdentity(source)));
+      return sourceList.filter(source => favorites.has(gpFavoriteIdentity(source)));
     }
     return [...sourceList];
   }
@@ -1174,6 +1191,17 @@
     root._gpCanonicalGalleryList = filterPresentationList(root, galleryList);
     root._gpGalleryList = [...root._gpCanonicalGalleryList];
     root.dataset.gpRandomized = '0';
+  
+    const onFavoritesChanged = (event) => {
+      if (event.detail?.galleryKey !== favoriteGalleryKey(root)) return;
+      if (!root.isConnected) {
+        document.removeEventListener(FAVORITES_CHANGED_EVENT, onFavoritesChanged);
+        return;
+      }
+      updateFavoriteButton(root);
+      if (root.dataset.gpPresentationMode === 'favorites') applyPresentationMode(root, true);
+    };
+    document.addEventListener(FAVORITES_CHANGED_EVENT, onFavoritesChanged);
   
     const media = currentMedia(root);
     root._gpActiveMedia = media;
@@ -1530,6 +1558,7 @@
     installOpenFolderControl(root);
     installExternalSourcesControl(root);
     installFileTypeFilterControl(root, sortSelect);
+    installGalleryFavorites(root, gallery);
     installArchiveControl(root, gallery, sortSelect);
     installReordering(root, gallery, sortSelect);
     disableGalleryPageSwipe(root, gallery);
@@ -1545,6 +1574,82 @@
     if (currentStatus) applyExternalMediaStatus(root, currentStatus);
   
     sortSelect.addEventListener('change', () => updateCustomOrderHint(root, sortSelect));
+  }
+  
+  function getThumbnailFavoriteSource(root, thumbnail) {
+    const filename = getThumbnailFilename(thumbnail);
+    if (!filename) return '';
+  
+    const visibleSource = thumbnail.querySelector('img, video')?.src || '';
+    if (visibleSource && !visibleSource.startsWith('data:')) return visibleSource;
+  
+    const folder = getGalleryFolder(root);
+    try {
+      const base = new URL(`/user/images/${encodeURIComponent(folder)}/`, location.origin);
+      return isExternalGalleryPath(filename)
+        ? new URL(filename, base).href
+        : new URL(encodeURIComponent(filename), base).href;
+    } catch {
+      return filename;
+    }
+  }
+  
+  function installGalleryFavorites(root, gallery) {
+    const refresh = () => {
+      const folder = getGalleryFolder(root);
+      const favorites = gpGetFavoriteSet(folder);
+      gallery.querySelectorAll('.nGY2GThumbnail').forEach((thumbnail) => {
+        if (!(thumbnail instanceof HTMLElement)) return;
+        let button = thumbnail.querySelector(':scope > .gp-thumbnail-favorite');
+        if (!(button instanceof HTMLButtonElement)) {
+          button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'gp-thumbnail-favorite';
+          button.draggable = false;
+          thumbnail.appendChild(button);
+        }
+        const source = getThumbnailFavoriteSource(root, thumbnail);
+        const favorite = Boolean(source) && favorites.has(gpFavoriteIdentity(source));
+        const icon = favorite ? '★' : '☆';
+        if (button.textContent !== icon) button.textContent = icon;
+        button.classList.toggle('active', favorite);
+        button.setAttribute('aria-pressed', String(favorite));
+        button.setAttribute('aria-label', favorite ? 'Remove from favorites' : 'Add to favorites');
+        button.title = favorite ? 'Remove from favorites' : 'Add to favorites';
+      });
+    };
+  
+    gallery.addEventListener('click', (event) => {
+      const button = event.target instanceof Element
+        ? event.target.closest('.gp-thumbnail-favorite')
+        : null;
+      if (!(button instanceof HTMLButtonElement) || !gallery.contains(button)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const thumbnail = button.closest('.nGY2GThumbnail');
+      if (!(thumbnail instanceof HTMLElement)) return;
+      const source = getThumbnailFavoriteSource(root, thumbnail);
+      if (source) gpToggleFavorite(getGalleryFolder(root), source);
+    }, true);
+  
+    const onFavoritesChanged = (event) => {
+      if (event.detail?.galleryKey !== gpFavoriteGalleryKey(getGalleryFolder(root))) return;
+      refresh();
+    };
+    document.addEventListener(FAVORITES_CHANGED_EVENT, onFavoritesChanged);
+  
+    const galleryObserver = new MutationObserver(refresh);
+    galleryObserver.observe(gallery, { childList: true, subtree: true });
+    refresh();
+  
+    const lifecycleObserver = new MutationObserver(() => {
+      if (document.body.contains(root)) return;
+      galleryObserver.disconnect();
+      document.removeEventListener(FAVORITES_CHANGED_EVENT, onFavoritesChanged);
+      lifecycleObserver.disconnect();
+    });
+    lifecycleObserver.observe(document.body, { childList: true, subtree: true });
   }
   
   function disableGalleryPageSwipe(root, gallery, attempt = 0) {
@@ -1741,21 +1846,24 @@
     header.append(heading, closeButton);
     panel.appendChild(header);
   
-    const label = document.createElement('label');
+    const label = document.createElement('div');
     label.className = 'gp-external-sources-label';
-    label.textContent = 'One address per line';
+    label.textContent = 'File and folder addresses';
   
-    const textarea = document.createElement('textarea');
-    textarea.className = 'gp-external-sources-input text_pole';
-    textarea.rows = 7;
-    textarea.placeholder = 'One file or folder address per line';
-    textarea.spellcheck = false;
-    label.appendChild(textarea);
+    const sourcesList = document.createElement('div');
+    sourcesList.className = 'gp-external-sources-list';
+    label.appendChild(sourcesList);
+  
+    const addSourceButton = document.createElement('button');
+    addSourceButton.type = 'button';
+    addSourceButton.className = 'menu_button gp-external-source-add';
+    addSourceButton.textContent = 'Add address';
+    label.appendChild(addSourceButton);
     panel.appendChild(label);
   
     const help = document.createElement('small');
     help.className = 'gp-external-sources-help';
-    help.textContent = 'Folders include supported images and videos in all subfolders. Files remain in their original locations.';
+    help.textContent = 'Uncheck an address to keep it saved but omit its files. Folders include supported images and videos in all subfolders; files remain in their original locations.';
     panel.appendChild(help);
   
     const status = document.createElement('div');
@@ -1784,19 +1892,91 @@
       applyExternalMediaStatus(root, event.detail, status);
     };
     window.addEventListener(EXTERNAL_STATUS_EVENT, onExternalMediaStatus);
+  
+    const addSourceRow = (entry = { address: '', enabled: true }) => {
+      const row = document.createElement('div');
+      row.className = 'gp-external-source-row';
+  
+      const enabled = document.createElement('input');
+      enabled.type = 'checkbox';
+      enabled.className = 'gp-external-source-enabled';
+      enabled.checked = entry.enabled !== false;
+      enabled.title = 'Enable this address';
+      enabled.setAttribute('aria-label', 'Enable this external address');
+  
+      const address = document.createElement('input');
+      address.type = 'text';
+      address.className = 'gp-external-source-address text_pole';
+      address.value = entry.address || '';
+      address.placeholder = 'File or folder address';
+      address.spellcheck = false;
+      address.setAttribute('aria-label', 'External file or folder address');
+      address.addEventListener('paste', (event) => {
+        const values = event.clipboardData?.getData('text')
+          .split(/\r?\n/)
+          .map(value => value.trim())
+          .filter(Boolean) || [];
+        if (values.length < 2) return;
+        event.preventDefault();
+        address.value = values.shift();
+        values.forEach(value => addSourceRow({ address: value, enabled: true }));
+      });
+  
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'gp-external-source-remove';
+      remove.textContent = '×';
+      remove.title = 'Remove address';
+      remove.setAttribute('aria-label', 'Remove external address');
+      remove.addEventListener('click', () => {
+        row.remove();
+        if (!sourcesList.children.length) addSourceRow();
+      });
+  
+      row.append(enabled, address, remove);
+      sourcesList.appendChild(row);
+      return address;
+    };
+  
+    const renderSourceRows = (entries) => {
+      sourcesList.replaceChildren();
+      const values = entries.length ? entries : [{ address: '', enabled: true }];
+      values.forEach(addSourceRow);
+    };
+  
+    const readSourceRows = () => {
+      const entries = [];
+      const seen = new Set();
+      sourcesList.querySelectorAll('.gp-external-source-row').forEach((row) => {
+        const address = row.querySelector('.gp-external-source-address')?.value?.trim() || '';
+        if (!address || seen.has(address)) return;
+        seen.add(address);
+        entries.push({
+          address,
+          enabled: row.querySelector('.gp-external-source-enabled')?.checked !== false,
+        });
+      });
+      return entries;
+    };
+  
+    addSourceButton.addEventListener('click', () => addSourceRow().focus());
     const openWindow = () => {
       document.querySelectorAll('.gp-file-types-window[open]').forEach((fileTypes) => {
         if (typeof fileTypes.close === 'function') fileTypes.close();
         else fileTypes.removeAttribute('open');
       });
       const folder = getGalleryFolder(root);
-      textarea.value = getExternalSources(folder).join('\n');
-      status.textContent = folder ? '' : 'Choose a gallery folder first.';
+      const entries = getExternalSourceEntries(folder);
+      renderSourceRows(entries);
+      const enabledCount = entries.filter(entry => entry.enabled).length;
+      status.textContent = folder
+        ? `${enabledCount} of ${entries.length} saved address${entries.length === 1 ? '' : 'es'} enabled.`
+        : 'Choose a gallery folder first.';
       if (typeof dialog.showModal === 'function') dialog.showModal();
       else dialog.setAttribute('open', '');
       button.classList.add('active');
       button.setAttribute('aria-expanded', 'true');
-      requestAnimationFrame(() => textarea.focus());
+      requestAnimationFrame(() => sourcesList.querySelector('.gp-external-source-address')?.focus());
     };
   
     button.addEventListener('click', openWindow);
@@ -1834,12 +2014,10 @@
         return;
       }
   
-      const sources = [...new Set(textarea.value
-        .split(/\r?\n/)
-        .map(value => value.trim())
-        .filter(Boolean))];
+      const entries = readSourceRows();
+      const sources = entries.filter(entry => entry.enabled).map(entry => entry.address);
       try {
-        saveExternalSources(folder, sources);
+        saveExternalSourceEntries(folder, entries);
         externalMediaCache.delete(folder);
         closeWindow();
         if (sources.length) {
@@ -1848,7 +2026,9 @@
         } else {
           queueOpenGalleryExternalSync(folder, []);
           publishExternalMediaStatus(folder, { loading: false, count: 0, errors: [] });
-          notify('success', 'External gallery sources cleared.');
+          notify('success', entries.length
+            ? 'External gallery addresses saved; all are disabled.'
+            : 'External gallery sources cleared.');
         }
       } catch (error) {
         console.error('[GalleryPlus] Failed to update external gallery sources', error);
@@ -2077,14 +2257,34 @@
   }
   
   function getExternalSources(folder) {
-    const stored = gpSettings().externalSources?.[folder];
-    return Array.isArray(stored) ? stored.filter(source => typeof source === 'string' && source.trim()) : [];
+    return getExternalSourceEntries(folder)
+      .filter(entry => entry.enabled)
+      .map(entry => entry.address);
   }
   
-  function saveExternalSources(folder, sources) {
+  function getExternalSourceEntries(folder) {
+    const stored = gpSettings().externalSources?.[folder];
+    if (!Array.isArray(stored)) return [];
+    const entries = [];
+    const seen = new Set();
+    stored.forEach((value) => {
+      const address = typeof value === 'string'
+        ? value.trim()
+        : (typeof value?.address === 'string' ? value.address.trim() : '');
+      if (!address || seen.has(address)) return;
+      seen.add(address);
+      entries.push({ address, enabled: typeof value === 'string' || value.enabled !== false });
+    });
+    return entries;
+  }
+  
+  function saveExternalSourceEntries(folder, entries) {
     if (!folder) return;
     const externalSources = { ...(gpSettings().externalSources || {}) };
-    if (sources.length) externalSources[folder] = [...sources];
+    if (entries.length) externalSources[folder] = entries.map(entry => ({
+      address: entry.address,
+      enabled: entry.enabled !== false,
+    }));
     else delete externalSources[folder];
     gpSaveSettings({ externalSources });
   }
@@ -2548,6 +2748,7 @@
   
     gallery.addEventListener('click', async (event) => {
       if (!archiveModeActive) return;
+      if (event.target instanceof Element && event.target.closest('.gp-thumbnail-favorite')) return;
       const thumbnail = event.target instanceof Element ? event.target.closest('.nGY2GThumbnail') : null;
       if (!(thumbnail instanceof HTMLElement)) return;
   
@@ -2621,6 +2822,10 @@
     decorate();
   
     gallery.addEventListener('dragstart', (event) => {
+      if (event.target instanceof Element && event.target.closest('.gp-thumbnail-favorite')) {
+        event.preventDefault();
+        return;
+      }
       const thumbnail = event.target instanceof Element ? event.target.closest('.nGY2GThumbnail') : null;
       if (!(thumbnail instanceof HTMLElement)) return;
       const filename = getThumbnailFilename(thumbnail);
@@ -2963,3 +3168,4 @@
 
   initObservers();
 })();
+
