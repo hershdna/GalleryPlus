@@ -14,7 +14,7 @@ custom image ordering, and safe gallery organization.
 - Slideshow playback and live image synchronization after the gallery closes
 - Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
 - A **Custom** gallery sort mode with drag-and-drop thumbnail reordering
-- Pagination-icon-only page changes, with page-swipe flipping disabled
+- Clickable and drag-scrubbable pagination icons, with thumbnail-area page flipping disabled
 - Safe Remove mode that moves files to `<gallery folder>/deprecated`
 - A gallery control that opens the current source folder in Windows Explorer
 - Per-gallery external file/folder addresses, including supported media in nested folders

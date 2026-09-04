@@ -1119,6 +1119,14 @@
   const EXTERNAL_VALIDATION_BATCH_SIZE = 12;
   const EXTERNAL_MEDIA_TIMEOUT_MS = 10000;
   const EXTERNAL_STATUS_EVENT = 'galleryplus:external-media-status';
+  const PAGINATION_ICON_SELECTOR = [
+    '.nGY2paginationRectangle',
+    '.nGY2paginationRectangleCurrentPage',
+    '.nGY2paginationDot',
+    '.nGY2paginationDotCurrentPage',
+    '.nGY2paginationItem',
+    '.nGY2paginationItemCurrentPage',
+  ].join(',');
   const VIDEO_THUMBNAIL = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent([
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 150">',
     '<rect width="240" height="150" fill="#171717"/>',
@@ -1227,6 +1235,7 @@
     installArchiveControl(root, gallery, sortSelect);
     installReordering(root, gallery, sortSelect);
     disableGalleryPageSwipe(root, gallery);
+    installPaginationScrubbing(root, gallery);
     installFailedMediaHandling(root, gallery);
     updateCustomOrderHint(root, sortSelect);
   
@@ -1266,6 +1275,83 @@
     if (attempt < 50) {
       setTimeout(() => disableGalleryPageSwipe(root, gallery, attempt + 1), 100);
     }
+  }
+  
+  function installPaginationScrubbing(root, gallery) {
+    if (gallery.dataset.gpPaginationScrubbing === '1') return;
+    gallery.dataset.gpPaginationScrubbing = '1';
+  
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let lastPage = null;
+    let moved = false;
+    let suppressNextClick = false;
+  
+    const paginationIconFromPoint = (x, y) => {
+      const target = document.elementFromPoint(x, y);
+      const icon = target instanceof Element ? target.closest(PAGINATION_ICON_SELECTOR) : null;
+      return icon instanceof HTMLElement && gallery.contains(icon) ? icon : null;
+    };
+  
+    const pageNumberForIcon = (icon) => {
+      const jq = window.jQuery;
+      const stored = typeof jq === 'function' ? jq(icon)?.data?.('pageNumber') : undefined;
+      const pageNumber = Number(stored ?? icon.dataset.pageNumber);
+      if (Number.isFinite(pageNumber)) return pageNumber;
+      return [...gallery.querySelectorAll(PAGINATION_ICON_SELECTOR)].indexOf(icon);
+    };
+  
+    const stopScrubbing = (event) => {
+      if (pointerId === null || (event && event.pointerId !== pointerId)) return;
+      pointerId = null;
+      lastPage = null;
+      root.classList.remove('gp-pagination-scrubbing');
+      document.removeEventListener('pointermove', onPointerMove, true);
+      document.removeEventListener('pointerup', stopScrubbing, true);
+      document.removeEventListener('pointercancel', stopScrubbing, true);
+      if (moved) {
+        suppressNextClick = true;
+        setTimeout(() => { suppressNextClick = false; }, 0);
+      }
+    };
+  
+    const onPointerMove = (event) => {
+      if (event.pointerId !== pointerId) return;
+      if (!moved && Math.hypot(event.clientX - startX, event.clientY - startY) < 4) return;
+      moved = true;
+      root.classList.add('gp-pagination-scrubbing');
+      const icon = paginationIconFromPoint(event.clientX, event.clientY);
+      if (!icon) return;
+      const pageNumber = pageNumberForIcon(icon);
+      if (pageNumber < 0 || pageNumber === lastPage) return;
+      lastPage = pageNumber;
+      event.preventDefault();
+      icon.click();
+    };
+  
+    gallery.addEventListener('pointerdown', (event) => {
+      const icon = event.target instanceof Element ? event.target.closest(PAGINATION_ICON_SELECTOR) : null;
+      if (!(icon instanceof HTMLElement) || !gallery.contains(icon)) return;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      lastPage = pageNumberForIcon(icon);
+      moved = false;
+      document.addEventListener('pointermove', onPointerMove, { capture: true, passive: false });
+      document.addEventListener('pointerup', stopScrubbing, true);
+      document.addEventListener('pointercancel', stopScrubbing, true);
+    });
+  
+    gallery.addEventListener('click', (event) => {
+      if (!suppressNextClick || !event.isTrusted) return;
+      const icon = event.target instanceof Element ? event.target.closest(PAGINATION_ICON_SELECTOR) : null;
+      if (!icon) return;
+      suppressNextClick = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
   }
   
   function installOpenFolderControl(root) {

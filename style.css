@@ -106,6 +106,27 @@
   outline: 3px solid var(--SmartThemeUnderlineColor, #7aa2f7);
   outline-offset: -3px;
 }
+#dragGallery :is(
+  .nGY2paginationRectangle,
+  .nGY2paginationRectangleCurrentPage,
+  .nGY2paginationDot,
+  .nGY2paginationDotCurrentPage,
+  .nGY2paginationItem,
+  .nGY2paginationItemCurrentPage
+) {
+  cursor: pointer;
+  touch-action: none;
+}
+.gp-pagination-scrubbing #dragGallery :is(
+  .nGY2paginationRectangle,
+  .nGY2paginationRectangleCurrentPage,
+  .nGY2paginationDot,
+  .nGY2paginationDotCurrentPage,
+  .nGY2paginationItem,
+  .nGY2paginationItemCurrentPage
+) {
+  cursor: ew-resize;
+}
 .gp-archive-mode.gp-busy {
   opacity: 0.55;
   pointer-events: none;
