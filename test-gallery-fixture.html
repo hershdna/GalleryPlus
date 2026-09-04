@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GalleryPlus organizer fixture</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .nGY2GThumbnail { display:inline-block; width:120px; height:90px; margin:8px; background:#444; }
+    .nGY2GThumbnail img { width:100%; height:100%; }
+    .right_menu_button { display:inline-block; width:32px; height:32px; background:#777; }
+    .fixture-pagination { display:flex; gap:10px; margin:12px; }
+    .nGY2paginationRectangle,
+    .nGY2paginationRectangleCurrentPage { width:48px; height:18px; background:#777; }
+    .nGY2paginationRectangleCurrentPage { background:#ddd; }
+    #page-four-target { position:absolute; left:450px; top:55px; visibility:hidden; }
+  </style>
+</head>
+<body>
+  <div id="gallery">
+    <div class="dragTitle">
+      <span>Image Gallery</span>
+      <select class="gallery-sort-select" aria-label="Gallery order">
+        <option value="nameAsc">Name (A-Z)</option>
+        <option value="nameDesc">Name (Z-A)</option>
+        <option value="dateDesc">Newest</option>
+        <option value="dateAsc" selected>Oldest</option>
+      </select>
+    </div>
+    <div class="flex-container">
+      <input class="gallery-folder-input" value="Character">
+      <div class="right_menu_button fa-solid fa-trash fa-fw" title="Delete mode"></div>
+    </div>
+    <div id="dragGallery">
+      <div class="nGY2GThumbnail" title="one.svg"><img src="/images/one.svg" alt="one"></div>
+      <div class="nGY2GThumbnail" title="two.svg"><img src="/images/two.svg" alt="two"></div>
+      <div class="nGY2GThumbnail" title="three.svg"><img src="/images/three.svg" alt="three"></div>
+      <div id="page-four-target" class="nGY2GThumbnail" title="wide.svg"><img src="/images/wide.svg" alt="page four target"></div>
+      <div class="fixture-pagination" aria-label="Gallery pages">
+        <div class="nGY2paginationRectangleCurrentPage" data-page-number="0" role="button" aria-label="Page 1"></div>
+        <div class="nGY2paginationRectangle" data-page-number="1" role="button" aria-label="Page 2"></div>
+        <div class="nGY2paginationRectangle" data-page-number="2" role="button" aria-label="Page 3"></div>
+        <div class="nGY2paginationRectangle" data-page-number="3" role="button" aria-label="Page 4"></div>
+        <div class="nGY2paginationRectangle" data-page-number="4" role="button" aria-label="Page 5"></div>
+      </div>
+    </div>
+  </div>
+  <div id="movingDivs"></div>
+  <button id="fetch-order">Fetch custom order</button>
+  <button id="test-cross-page-reorder">Test cross-page reorder</button>
+  <button id="show-performance-notices">Show performance notices</button>
+  <output id="fetch-result"></output>
+  <script>
+    const fixtureOptions = new URLSearchParams(location.search);
+    const settings = {
+      gallery: { sort: 'dateAsc', folders: {} },
+      GalleryPlus: {
+        customOrders: {},
+        externalSources: fixtureOptions.has('linked') ? { Character: ['E:\\Large Gallery'] } : {},
+        fileTypeFilters: {},
+      },
+    };
+    const files = ['one.svg', 'two.svg', 'three.svg', 'wide.svg', 'clip.webm', 'movie.mp4'];
+    const items = files.map(file => ({
+      src: file.endsWith('.svg')
+        ? `http://127.0.0.1:41789/images/${file}`
+        : `http://127.0.0.1:41789/user/images/Character/${file}`,
+      responsiveURL() { return this.src; },
+    }));
+    window.SillyTavern = {
+      getContext() {
+        return {
+          extensionSettings: settings,
+          getRequestHeaders() { return { 'Content-Type': 'application/json' }; },
+          saveSettingsDebounced() {
+            document.body.dataset.settings = JSON.stringify(settings);
+          },
+        };
+      },
+    };
+    const galleryInstance = { fixture: true };
+    const galleryPluginData = {
+      options: { paginationSwipe: true, galleryNavigationOverlayButtons: true },
+      nG2: { O: { paginationSwipe: true, galleryNavigationOverlayButtons: true } },
+    };
+    const galleryElement = document.querySelector('#dragGallery');
+    ['dragstart', 'dragover', 'drop', 'dragend'].forEach(type => {
+      galleryElement.addEventListener(type, () => {
+        document.body.dataset[`event${type}`] = String(Number(document.body.dataset[`event${type}`] || 0) + 1);
+      });
+    });
+    galleryElement.querySelector('.fixture-pagination').addEventListener('click', (event) => {
+      const icon = event.target.closest('[data-page-number]');
+      if (!icon) return;
+      document.body.dataset.currentPage = icon.dataset.pageNumber;
+      document.body.dataset.pageChanges = String(Number(document.body.dataset.pageChanges || 0) + 1);
+      document.getElementById('page-four-target').style.visibility = icon.dataset.pageNumber === '3'
+        ? 'visible'
+        : 'hidden';
+    });
+    const galleryApi = {
+      length: 1,
+      nanogallery2(command) {
+        if (command === 'data') return { items, gallery: { albumIdx: 0 } };
+        if (command === 'instance') return galleryInstance;
+        if (command === 'resize') document.body.dataset.galleryResizeCount = String(Number(document.body.dataset.galleryResizeCount || 0) + 1);
+        return this;
+      },
+      data(name) {
+        return name === 'nanogallery2data' ? galleryPluginData : undefined;
+      },
+    };
+    window.jQuery = window.$ = selector => (selector === '#dragGallery' || selector === galleryElement)
+      ? galleryApi
+      : { length: 0 };
+    window.NGY2Item = {
+      New(_instance, title) {
+        const item = {
+          title,
+          src: '',
+          responsiveURL() { return this.src; },
+          thumbSet(url) { this.thumbnail = url; },
+          setMediaURL(url) { this.src = url; },
+          addToGOM() {
+            items.push(this);
+            const thumbnail = document.createElement('div');
+            thumbnail.className = 'nGY2GThumbnail';
+            thumbnail.title = title;
+            const image = document.createElement('img');
+            image.src = this.thumbnail;
+            image.alt = title;
+            thumbnail.appendChild(image);
+            galleryElement.appendChild(thumbnail);
+          },
+          delete() {
+            const index = items.indexOf(this);
+            if (index >= 0) items.splice(index, 1);
+            [...galleryElement.querySelectorAll('.nGY2GThumbnail')]
+              .find(thumbnail => thumbnail.title === title)?.remove();
+          },
+        };
+        return item;
+      },
+    };
+    window.confirm = () => true;
+    window.toastr = {
+      info(message) { recordToast(message); },
+      warning(message) { recordToast(message); },
+      success(message) { recordToast(message); },
+      error(message) { recordToast(message); },
+    };
+    function recordToast(message) {
+      document.body.dataset.toast = message;
+      document.body.dataset.toastCallCount = String(Number(document.body.dataset.toastCallCount || 0) + 1);
+    }
+    window.fetch = async (input, init) => {
+      const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
+      if (path === '/api/plugins/galleryplus/archive') {
+        document.body.dataset.archiveRequest = init.body;
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (path === '/api/plugins/galleryplus/open-folder') {
+        if (new URLSearchParams(location.search).has('outdated')) {
+          return new Response('<!doctype html><p>Cannot POST /api/plugins/galleryplus/open-folder</p>', {
+            status: 404,
+            headers: { 'Content-Type': 'text/html' },
+          });
+        }
+        document.body.dataset.openFolderRequest = init.body;
+        return new Response(null, { status: 204 });
+      }
+      if (path === '/api/plugins/galleryplus/health') {
+        return new Response(JSON.stringify({ ok: true, capabilities: ['archive', 'open-folder', 'external-media'] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (path === '/api/plugins/galleryplus/external-media/list') {
+        document.body.dataset.externalRequest = init.body;
+        document.body.dataset.externalStartedAt = String(performance.now());
+        if (fixtureOptions.has('slow')) await new Promise(resolve => setTimeout(resolve, 1200));
+        document.body.dataset.externalFinishedAt = String(performance.now());
+        const externalItems = [
+            {
+              name: 'outside.png',
+              url: '/api/plugins/galleryplus/external-media/file/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',
+            },
+            {
+              name: 'durationless.webm',
+              url: '/api/plugins/galleryplus/external-media/file/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.webm',
+            },
+          ];
+        if (fixtureOptions.has('videoThumb')) externalItems.push({
+          name: 'thumbnail.mp4',
+          url: '/api/plugins/galleryplus/external-media/file/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.mp4',
+        });
+        return new Response(JSON.stringify({
+          items: externalItems,
+          errors: [],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (path === '/api/images/list') {
+        document.body.dataset.imagesListRequest = init.body;
+        document.body.dataset.imagesListRespondedAt = String(performance.now());
+        return new Response(JSON.stringify(files), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('', { status: 404 });
+    };
+    document.addEventListener('click', (event) => {
+      if (event.target instanceof Element && event.target.closest('.gp-external-sources-window')) {
+        document.body.dataset.modalClickEscaped = '1';
+        document.querySelector('#gallery')?.remove();
+      }
+    });
+    document.querySelector('.gallery-sort-select').addEventListener('change', (event) => {
+      settings.gallery.sort = event.target.value;
+      document.body.dataset.refreshCount = String(Number(document.body.dataset.refreshCount || 0) + 1);
+      document.body.dataset.settings = JSON.stringify(settings);
+    });
+  </script>
+  <script src="/index.js"></script>
+  <script>
+    const viewer = document.createElement('div');
+    viewer.className = 'draggable galleryImageDraggable';
+    viewer.style.cssText = 'position:fixed;left:20px;bottom:20px;width:520px;height:360px';
+    viewer.innerHTML = [
+      '<div class="dragTitle">Gallery slideshow</div>',
+      '<div class="panelControlBar"><button class="dragClose">Close</button></div>',
+      '<img src="/images/one.svg" alt="Current slide">',
+    ].join('');
+    document.getElementById('movingDivs').appendChild(viewer);
+    document.getElementById('fetch-order').addEventListener('click', async () => {
+      const response = await fetch('/api/images/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: 'Character', sortField: 'date', sortOrder: 'asc' }),
+      });
+      document.getElementById('fetch-result').textContent = JSON.stringify(await response.json());
+    });
+    document.getElementById('test-cross-page-reorder').addEventListener('click', async () => {
+      const source = document.querySelector('.nGY2GThumbnail[title="one.svg"]');
+      const page = document.querySelector('[aria-label="Page 4"]');
+      const target = document.getElementById('page-four-target');
+      const transfer = new DataTransfer();
+      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: transfer }));
+      page.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      await new Promise(resolve => setTimeout(resolve, 520));
+      const targetRect = target.getBoundingClientRect();
+      target.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        cancelable: true,
+        clientX: targetRect.left + 5,
+        dataTransfer: transfer,
+      }));
+      target.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        clientX: targetRect.left + 5,
+        dataTransfer: transfer,
+      }));
+      source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: transfer }));
+      document.body.dataset.crossPageComplete = '1';
+    });
+    document.getElementById('show-performance-notices').addEventListener('click', () => {
+      for (let index = 0; index < 3; index += 1) {
+        window.toastr.info('Open the full gallery in Character Library for better performance');
+      }
+    });
+    setInterval(() => {
+      document.body.dataset.settings = JSON.stringify(settings);
+    }, 10);
+  </script>
+</body>
+</html>
+
