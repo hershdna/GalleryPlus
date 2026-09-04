@@ -1,7 +1,8 @@
 {
   "name": "galleryplus-server-plugin",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "main": "index.js",
   "type": "commonjs"
 }
+
