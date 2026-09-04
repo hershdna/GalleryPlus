@@ -9,6 +9,7 @@ const plugin = require('./server-plugin');
   let openFolderHandler;
   let healthHandler;
   let externalListHandler;
+  let sourceFoldersHandler;
   let externalFileHandler;
   let legacyExternalFileHandler;
   await plugin.init({
@@ -21,18 +22,20 @@ const plugin = require('./server-plugin');
       if (route === '/archive') archiveHandler = handler;
       if (route === '/open-folder') openFolderHandler = handler;
       if (route === '/external-media/list') externalListHandler = handler;
+      if (route === '/source-folders/list') sourceFoldersHandler = handler;
     },
   });
   assert.equal(typeof archiveHandler, 'function');
   assert.equal(typeof openFolderHandler, 'function');
   assert.equal(typeof healthHandler, 'function');
   assert.equal(typeof externalListHandler, 'function');
+  assert.equal(typeof sourceFoldersHandler, 'function');
   assert.equal(typeof externalFileHandler, 'function');
   assert.equal(typeof legacyExternalFileHandler, 'function');
   const healthResult = { body: null };
   healthHandler({}, { json(bodyValue) { healthResult.body = bodyValue; } });
-  assert.equal(healthResult.body.version, '1.4.1');
-  assert.deepEqual(healthResult.body.capabilities, ['archive', 'open-folder', 'external-media']);
+  assert.equal(healthResult.body.version, '1.5.0');
+  assert.deepEqual(healthResult.body.capabilities, ['archive', 'open-folder', 'external-media', 'source-folders']);
 
   const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'galleryplus-'));
   const imagesRoot = path.join(testRoot, 'images');
@@ -82,6 +85,22 @@ const plugin = require('./server-plugin');
         fs.readFileSync(path.join(__dirname, file), 'utf8'),
       );
     }
+
+    const automaticFolder = path.join(sourceFolder, 'Sets');
+    fs.mkdirSync(path.join(automaticFolder, 'Nested'), { recursive: true });
+    fs.mkdirSync(path.join(sourceFolder, 'deprecated'), { recursive: true });
+    const sourceFolderResult = { status: 200, body: null };
+    const sourceFolderResponse = {
+      status(code) { sourceFolderResult.status = code; return sourceFolderResponse; },
+      send(bodyValue) { sourceFolderResult.body = bodyValue; return sourceFolderResponse; },
+      json(bodyValue) { sourceFolderResult.body = bodyValue; return sourceFolderResponse; },
+    };
+    await sourceFoldersHandler({
+      body: { folder: 'Character' },
+      user: { directories: { userImages: imagesRoot } },
+    }, sourceFolderResponse);
+    assert.equal(sourceFolderResult.status, 200);
+    assert.deepEqual(sourceFolderResult.body.folders, [automaticFolder]);
 
     fs.writeFileSync(path.join(sourceFolder, 'image.png'), 'first');
     const first = await invoke({ folder: 'Character', filename: 'image.png' });
@@ -137,10 +156,11 @@ const plugin = require('./server-plugin');
     await externalFileHandler({ params: { tokenFile } }, fileResponse);
     assert.equal(served.path, path.join(nestedFolder, 'movie.mp4'));
     assert.equal(served.cache, 'private, max-age=300');
-    console.log('server plugin archive and external-media tests passed');
+    console.log('server plugin archive, source-folder, and external-media tests passed');
   } finally {
     const resolved = path.resolve(testRoot);
     assert.ok(resolved.startsWith(path.resolve(os.tmpdir()) + path.sep));
     fs.rmSync(resolved, { recursive: true, force: true });
   }
 })();
+
