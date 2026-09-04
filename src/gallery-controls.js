@@ -4,6 +4,7 @@ const CUSTOM_SORT = 'custom';
 const ARCHIVE_ENDPOINT = '/api/plugins/galleryplus/archive';
 const OPEN_FOLDER_ENDPOINT = '/api/plugins/galleryplus/open-folder';
 const EXTERNAL_LIST_ENDPOINT = '/api/plugins/galleryplus/external-media/list';
+const SOURCE_FOLDERS_ENDPOINT = '/api/plugins/galleryplus/source-folders/list';
 const EXTERNAL_FILE_PREFIX = '/api/plugins/galleryplus/external-media/file/';
 const SERVER_HEALTH_ENDPOINT = '/api/plugins/galleryplus/health';
 const IMAGE_FILE_TYPES = ['bmp', 'gif', 'jfif', 'jpeg', 'jpg', 'png', 'webp'];
@@ -13,6 +14,7 @@ const EXTERNAL_CACHE_TTL_MS = 5000;
 const EXTERNAL_VALIDATION_BATCH_SIZE = 12;
 const EXTERNAL_MEDIA_TIMEOUT_MS = 10000;
 const EXTERNAL_STATUS_EVENT = 'galleryplus:external-media-status';
+const AUTOMATIC_SOURCES_EVENT = 'galleryplus:automatic-sources-changed';
 const PAGINATION_ICON_SELECTOR = [
   '.nGY2paginationRectangle',
   '.nGY2paginationRectangleCurrentPage',
@@ -36,6 +38,7 @@ const externalMediaLoads = new Map();
 const externalMediaStatus = new Map();
 const externalGallerySyncTimers = new Map();
 const externalValidationCache = new Map();
+const automaticSourceLoads = new Map();
 
 export function installCustomOrderFetchHook() {
   if (fetchHookInstalled) return;
@@ -140,6 +143,7 @@ export function wireGallery(root) {
   if (cached) queueOpenGalleryExternalSync(folder, getVisibleExternalItems(folder, cached.items));
   const currentStatus = externalMediaStatus.get(folder);
   if (currentStatus) applyExternalMediaStatus(root, currentStatus);
+  void syncAutomaticSourceFolders(root);
 
   sortSelect.addEventListener('change', () => updateCustomOrderHint(root, sortSelect));
 }
@@ -172,6 +176,9 @@ function installGalleryFavorites(root, gallery) {
     const favorites = gpGetFavoriteSet(folder);
     gallery.querySelectorAll('.nGY2GThumbnail').forEach((thumbnail) => {
       if (!(thumbnail instanceof HTMLElement)) return;
+      if (getComputedStyle(thumbnail).position === 'static') {
+        thumbnail.classList.add('gp-thumbnail-favorite-anchor');
+      }
       let button = thumbnail.querySelector(':scope > .gp-thumbnail-favorite');
       if (!(button instanceof HTMLButtonElement)) {
         button = document.createElement('button');
@@ -430,12 +437,26 @@ function installExternalSourcesControl(root) {
   addSourceButton.type = 'button';
   addSourceButton.className = 'menu_button gp-external-source-add';
   addSourceButton.textContent = 'Add address';
-  label.appendChild(addSourceButton);
+
+  const selectAllButton = document.createElement('button');
+  selectAllButton.type = 'button';
+  selectAllButton.className = 'menu_button gp-external-source-select-all';
+  selectAllButton.textContent = 'Select all';
+
+  const selectNoneButton = document.createElement('button');
+  selectNoneButton.type = 'button';
+  selectNoneButton.className = 'menu_button gp-external-source-select-none';
+  selectNoneButton.textContent = 'Select none';
+
+  const sourceActions = document.createElement('div');
+  sourceActions.className = 'gp-external-source-actions';
+  sourceActions.append(addSourceButton, selectAllButton, selectNoneButton);
+  label.appendChild(sourceActions);
   panel.appendChild(label);
 
   const help = document.createElement('small');
   help.className = 'gp-external-sources-help';
-  help.textContent = 'Uncheck an address to keep it saved but omit its files. Folders include supported images and videos in all subfolders; files remain in their original locations.';
+  help.textContent = 'Source subfolders are linked automatically (except deprecated). Uncheck any address to keep it saved but omit its files. Folders include supported images and videos in all subfolders.';
   panel.appendChild(help);
 
   const status = document.createElement('div');
@@ -464,10 +485,20 @@ function installExternalSourcesControl(root) {
     applyExternalMediaStatus(root, event.detail, status);
   };
   window.addEventListener(EXTERNAL_STATUS_EVENT, onExternalMediaStatus);
+  const onAutomaticSourcesChanged = (event) => {
+    if (event.detail?.folder !== getGalleryFolder(root) || !dialog.open) return;
+    if (dialog.dataset.gpDirty === '1') return;
+    const entries = Array.isArray(event.detail.entries) ? event.detail.entries : [];
+    renderSourceRows(entries);
+    const enabledCount = entries.filter(entry => entry.enabled).length;
+    status.textContent = `${enabledCount} of ${entries.length} address${entries.length === 1 ? '' : 'es'} enabled.`;
+  };
+  window.addEventListener(AUTOMATIC_SOURCES_EVENT, onAutomaticSourcesChanged);
 
   const addSourceRow = (entry = { address: '', enabled: true }) => {
     const row = document.createElement('div');
     row.className = 'gp-external-source-row';
+    row.dataset.gpAutomatic = entry.automatic ? '1' : '0';
 
     const enabled = document.createElement('input');
     enabled.type = 'checkbox';
@@ -475,6 +506,7 @@ function installExternalSourcesControl(root) {
     enabled.checked = entry.enabled !== false;
     enabled.title = 'Enable this address';
     enabled.setAttribute('aria-label', 'Enable this external address');
+    enabled.addEventListener('change', () => { dialog.dataset.gpDirty = '1'; });
 
     const address = document.createElement('input');
     address.type = 'text';
@@ -483,6 +515,9 @@ function installExternalSourcesControl(root) {
     address.placeholder = 'File or folder address';
     address.spellcheck = false;
     address.setAttribute('aria-label', 'External file or folder address');
+    address.readOnly = entry.automatic === true;
+    if (address.readOnly) address.title = 'Automatically linked source subfolder';
+    address.addEventListener('input', () => { dialog.dataset.gpDirty = '1'; });
     address.addEventListener('paste', (event) => {
       const values = event.clipboardData?.getData('text')
         .split(/\r?\n/)
@@ -490,22 +525,32 @@ function installExternalSourcesControl(root) {
         .filter(Boolean) || [];
       if (values.length < 2) return;
       event.preventDefault();
+      dialog.dataset.gpDirty = '1';
       address.value = values.shift();
       values.forEach(value => addSourceRow({ address: value, enabled: true }));
     });
 
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'gp-external-source-remove';
-    remove.textContent = '×';
-    remove.title = 'Remove address';
-    remove.setAttribute('aria-label', 'Remove external address');
-    remove.addEventListener('click', () => {
-      row.remove();
-      if (!sourcesList.children.length) addSourceRow();
-    });
+    let trailing;
+    if (entry.automatic) {
+      trailing = document.createElement('span');
+      trailing.className = 'gp-external-source-auto';
+      trailing.textContent = 'Auto';
+      trailing.title = 'Automatically linked source subfolder';
+    } else {
+      trailing = document.createElement('button');
+      trailing.type = 'button';
+      trailing.className = 'gp-external-source-remove';
+      trailing.textContent = '×';
+      trailing.title = 'Remove address';
+      trailing.setAttribute('aria-label', 'Remove external address');
+      trailing.addEventListener('click', () => {
+        dialog.dataset.gpDirty = '1';
+        row.remove();
+        if (!sourcesList.children.length) addSourceRow();
+      });
+    }
 
-    row.append(enabled, address, remove);
+    row.append(enabled, address, trailing);
     sourcesList.appendChild(row);
     return address;
   };
@@ -514,6 +559,7 @@ function installExternalSourcesControl(root) {
     sourcesList.replaceChildren();
     const values = entries.length ? entries : [{ address: '', enabled: true }];
     values.forEach(addSourceRow);
+    dialog.dataset.gpDirty = '0';
   };
 
   const readSourceRows = () => {
@@ -526,12 +572,26 @@ function installExternalSourcesControl(root) {
       entries.push({
         address,
         enabled: row.querySelector('.gp-external-source-enabled')?.checked !== false,
+        automatic: row.dataset.gpAutomatic === '1',
       });
     });
     return entries;
   };
 
-  addSourceButton.addEventListener('click', () => addSourceRow().focus());
+  const setAllSourcesEnabled = (enabled) => {
+    sourcesList.querySelectorAll('.gp-external-source-enabled').forEach((input) => {
+      if (input instanceof HTMLInputElement) input.checked = enabled;
+    });
+    dialog.dataset.gpDirty = '1';
+    const entries = readSourceRows();
+    status.textContent = `${entries.filter(entry => entry.enabled).length} of ${entries.length} address${entries.length === 1 ? '' : 'es'} enabled.`;
+  };
+  addSourceButton.addEventListener('click', () => {
+    dialog.dataset.gpDirty = '1';
+    addSourceRow().focus();
+  });
+  selectAllButton.addEventListener('click', () => setAllSourcesEnabled(true));
+  selectNoneButton.addEventListener('click', () => setAllSourcesEnabled(false));
   const openWindow = () => {
     document.querySelectorAll('.gp-file-types-window[open]').forEach((fileTypes) => {
       if (typeof fileTypes.close === 'function') fileTypes.close();
@@ -549,6 +609,7 @@ function installExternalSourcesControl(root) {
     button.classList.add('active');
     button.setAttribute('aria-expanded', 'true');
     requestAnimationFrame(() => sourcesList.querySelector('.gp-external-source-address')?.focus());
+    void syncAutomaticSourceFolders(root);
   };
 
   button.addEventListener('click', openWindow);
@@ -586,7 +647,10 @@ function installExternalSourcesControl(root) {
       return;
     }
 
-    const entries = readSourceRows();
+    const automaticFolders = getExternalSourceEntries(folder)
+      .filter(entry => entry.automatic)
+      .map(entry => entry.address);
+    const entries = mergeAutomaticSourceEntries(readSourceRows(), automaticFolders);
     const sources = entries.filter(entry => entry.enabled).map(entry => entry.address);
     try {
       saveExternalSourceEntries(folder, entries);
@@ -618,6 +682,7 @@ function installExternalSourcesControl(root) {
     closeWindow();
     dialog.remove();
     window.removeEventListener(EXTERNAL_STATUS_EVENT, onExternalMediaStatus);
+    window.removeEventListener(AUTOMATIC_SOURCES_EVENT, onAutomaticSourcesChanged);
     lifecycleObserver.disconnect();
   });
   lifecycleObserver.observe(document.body, { childList: true, subtree: true });
@@ -845,9 +910,32 @@ function getExternalSourceEntries(folder) {
       : (typeof value?.address === 'string' ? value.address.trim() : '');
     if (!address || seen.has(address)) return;
     seen.add(address);
-    entries.push({ address, enabled: typeof value === 'string' || value.enabled !== false });
+    entries.push({
+      address,
+      enabled: typeof value === 'string' || value.enabled !== false,
+      automatic: typeof value !== 'string' && value.automatic === true,
+    });
   });
   return entries;
+}
+
+function mergeAutomaticSourceEntries(entries, folders) {
+  const automaticByAddress = new Map(entries
+    .filter(entry => entry.automatic)
+    .map(entry => [entry.address, entry]));
+  const manual = entries.filter(entry => !entry.automatic);
+  const manualAddresses = new Set(manual.map(entry => entry.address));
+  const automatic = [...new Set(folders)]
+    .filter(address => typeof address === 'string' && address.trim() && !manualAddresses.has(address.trim()))
+    .map((address) => {
+      const normalized = address.trim();
+      return {
+        address: normalized,
+        enabled: automaticByAddress.get(normalized)?.enabled !== false,
+        automatic: true,
+      };
+    });
+  return [...automatic, ...manual];
 }
 
 function saveExternalSourceEntries(folder, entries) {
@@ -856,9 +944,56 @@ function saveExternalSourceEntries(folder, entries) {
   if (entries.length) externalSources[folder] = entries.map(entry => ({
     address: entry.address,
     enabled: entry.enabled !== false,
+    ...(entry.automatic ? { automatic: true } : {}),
   }));
   else delete externalSources[folder];
   gpSaveSettings({ externalSources });
+}
+
+async function syncAutomaticSourceFolders(root) {
+  const folder = getGalleryFolder(root);
+  if (!folder) return [];
+  if (automaticSourceLoads.has(folder)) return automaticSourceLoads.get(folder);
+
+  const load = (async () => {
+    try {
+      const response = await window.fetch(SOURCE_FOLDERS_ENDPOINT, {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ folder }),
+      });
+      if (!response.ok) return getExternalSourceEntries(folder);
+      const payload = await response.json();
+      const folders = Array.isArray(payload?.folders)
+        ? payload.folders.filter(value => typeof value === 'string' && value.trim())
+        : [];
+      const current = getExternalSourceEntries(folder);
+      const merged = mergeAutomaticSourceEntries(current, folders);
+      const changed = JSON.stringify(current) !== JSON.stringify(merged);
+      if (changed) saveExternalSourceEntries(folder, merged);
+      window.dispatchEvent(new CustomEvent(AUTOMATIC_SOURCES_EVENT, {
+        detail: { folder, entries: merged },
+      }));
+
+      if (changed) {
+        externalMediaCache.delete(folder);
+        const sources = merged.filter(entry => entry.enabled).map(entry => entry.address);
+        if (sources.length) void loadExternalMediaInBackground(folder, sources, window.fetch, true);
+        else {
+          queueOpenGalleryExternalSync(folder, []);
+          publishExternalMediaStatus(folder, { loading: false, count: 0, errors: [] });
+        }
+      }
+      return merged;
+    } catch (error) {
+      console.warn('[GalleryPlus] Could not discover gallery source subfolders', error);
+      return getExternalSourceEntries(folder);
+    } finally {
+      automaticSourceLoads.delete(folder);
+    }
+  })();
+  automaticSourceLoads.set(folder, load);
+  return load;
 }
 
 async function fetchExternalMedia(sources, fetchImpl = window.fetch, diagnose = false) {
