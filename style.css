@@ -133,6 +133,9 @@
   outline: 3px solid var(--SmartThemeUnderlineColor, #7aa2f7);
   outline-offset: -3px;
 }
+.gp-thumbnail-favorite-anchor {
+  position: relative;
+}
 .gp-thumbnail-favorite {
   position: absolute;
   top: 4px;
@@ -299,6 +302,20 @@
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-weight: 400;
 }
+.gp-external-source-address[readonly] {
+  opacity: 0.82;
+}
+.gp-external-source-auto {
+  min-width: 32px;
+  padding: 3px 4px;
+  border: 1px solid var(--SmartThemeUnderlineColor, #7aa2f7);
+  border-radius: 5px;
+  color: var(--SmartThemeUnderlineColor, #7aa2f7);
+  font-size: 0.7em;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+}
 .gp-external-source-remove {
   width: 29px;
   height: 29px;
@@ -314,8 +331,10 @@
 .gp-external-source-remove:hover {
   background: rgba(255, 90, 90, 0.28);
 }
-.gp-external-source-add {
-  align-self: start;
+.gp-external-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-top: 2px;
 }
 .gp-external-sources-help,
@@ -379,11 +398,16 @@
 }
 
 /* ===== Slideshow media viewport ===== */
+.galleryImageDraggable.draggable:not([data-gp-wired="1"]) {
+  opacity: 0;
+}
+
 .galleryImageDraggable.draggable {
   display: flex !important;
   flex-direction: column;
   overflow: hidden;
   background: #000 !important;
+  transition: opacity 80ms ease;
 }
 
 .galleryImageDraggable.draggable > .gp-controls-left {
