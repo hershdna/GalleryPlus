@@ -21,7 +21,7 @@ custom image ordering, and safe gallery organization.
 - Clickable and drag-scrubbable pagination icons, with thumbnail-area page flipping disabled
 - Safe Remove mode that moves files to `<gallery folder>/deprecated`
 - A gallery control that opens the current source folder in Windows Explorer
-- Per-gallery external file/folder addresses, including supported media in nested folders
+- Per-gallery external file/folder addresses, including automatically linked source subfolders
 - Immediate gallery opening with validated external media populated progressively in the background
 - Automatic omission of missing, unreadable, corrupt, unsupported, and durationless external media
 - Per-gallery file-type filters shared by the thumbnail view and slideshow
@@ -68,10 +68,12 @@ the server plugin to open that gallery's source directory in Windows Explorer.
 ## Adding files from other locations
 
 Click the link control next to the gallery folder field to open the External
-Files and Folders window. Enter one full file or folder address per line, then click **Apply**. Folder addresses are scanned
+Files and Folders window. Immediate subfolders of the current source folder are
+linked automatically and marked **Auto**; `deprecated` is always excluded.
+Use **Select all** or **Select none** to enable or disable every address at once,
+or add full file and folder addresses manually. Folder addresses are scanned
 recursively for supported image and video files. The addresses are saved for
-the current gallery folder, while the original files stay in place. To remove
-an external item from the gallery, edit or remove its address from this list.
+the current gallery folder, while the original files stay in place.
 Large folders are scanned and validated in the background. External entries are
 never included in SillyTavern's blocking window-opening request, so the gallery
 opens with local items first and adds playable media in small batches. Files that
@@ -103,3 +105,4 @@ The modular source is in `src/`. Build the release script with:
 npm install
 npm run build
 ```
+
