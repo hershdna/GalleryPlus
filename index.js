@@ -18,6 +18,9 @@
     videoMuted: false,
     videoControlsVisible: true,
     videoLoopTimeSec: 10,
+    autoHideControls: false,
+    presentationMode: 'all',
+    favoritesByGallery: {},
     externalSources: {},
     fileTypeFilters: {},
     customOrders: {},
@@ -238,6 +241,15 @@
       left.innerHTML = '';
     }
   
+    let progressRow = root.querySelector(':scope > .gp-progress-row');
+    if (!progressRow) {
+      progressRow = document.createElement('div');
+      progressRow.className = 'gp-progress-row';
+      root.insertBefore(progressRow, pcBar);
+    } else {
+      progressRow.innerHTML = '';
+    }
+  
     // 💾 save default size/pos
     const saveBtn = document.createElement('button');
     saveBtn.className = 'gp-btn gp-save';
@@ -328,6 +340,46 @@
       randomBtn.setAttribute('aria-pressed', String(randomized));
     });
   
+    // ⭐ favorite the current item for this gallery
+    const favoriteBtn = document.createElement('button');
+    favoriteBtn.className = 'gp-btn gp-favorite';
+    favoriteBtn.setAttribute('aria-pressed', 'false');
+    const favoriteIcon = document.createElement('span');
+    favoriteIcon.setAttribute('aria-hidden', 'true');
+    favoriteIcon.textContent = '☆';
+    favoriteBtn.appendChild(favoriteIcon);
+    favoriteBtn.addEventListener('click', () => toggleCurrentFavorite(root));
+  
+    // Content filter used by sequential and shuffled playback.
+    const presentationWrap = document.createElement('label');
+    presentationWrap.className = 'gp-presentation-wrap';
+    presentationWrap.title = 'Presentation mode';
+    const presentationLabel = document.createElement('span');
+    presentationLabel.textContent = 'Mode';
+    const presentation = document.createElement('select');
+    presentation.className = 'gp-presentation-mode';
+    presentation.setAttribute('aria-label', 'Presentation mode');
+    [
+      ['all', 'All media'],
+      ['favorites', 'Favorites only'],
+      ['images', 'Images only'],
+      ['videos', 'Videos only'],
+    ].forEach(([value, label]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      presentation.appendChild(option);
+    });
+    presentation.value = normalizePresentationMode(gpSettings().presentationMode);
+    presentation.addEventListener('change', () => {
+      const mode = normalizePresentationMode(presentation.value);
+      gpSaveSettings({ presentationMode: mode });
+      root.dataset.gpPresentationMode = mode;
+      applyPresentationMode(root, true);
+    });
+    presentationWrap.appendChild(presentationLabel);
+    presentationWrap.appendChild(presentation);
+  
     // 🔊 globally mute/unmute slideshow videos
     const muteBtn = document.createElement('button');
     muteBtn.className = 'gp-btn gp-mute';
@@ -378,6 +430,31 @@
       refreshVideoControlsButton();
     });
     refreshVideoControlsButton();
+  
+    // Hide slideshow controls after a short period of pointer inactivity.
+    const autoHideBtn = document.createElement('button');
+    autoHideBtn.className = 'gp-btn gp-auto-hide';
+    autoHideBtn.setAttribute('aria-pressed', String(!!gpSettings().autoHideControls));
+    const autoHideIcon = document.createElement('span');
+    autoHideIcon.setAttribute('aria-hidden', 'true');
+    autoHideBtn.appendChild(autoHideIcon);
+  
+    function refreshAutoHideButton() {
+      const enabled = root.dataset.gpAutoHideControls === '1';
+      autoHideIcon.textContent = enabled ? '🫥' : '👁️';
+      autoHideBtn.classList.toggle('active', enabled);
+      autoHideBtn.setAttribute('aria-pressed', String(enabled));
+      autoHideBtn.title = enabled ? 'Disable auto-hide slideshow controls' : 'Enable auto-hide slideshow controls';
+      autoHideBtn.setAttribute('aria-label', autoHideBtn.title);
+    }
+    autoHideBtn.addEventListener('click', () => {
+      const enabled = root.dataset.gpAutoHideControls !== '1';
+      gpSaveSettings({ autoHideControls: enabled });
+      setAutoHideControls(root, enabled);
+      refreshAutoHideButton();
+    });
+    setAutoHideControls(root, !!gpSettings().autoHideControls);
+    refreshAutoHideButton();
   
     // minimum total video play time; advancement always waits for a loop boundary
     const videoLoopWrap = document.createElement('label');
@@ -512,15 +589,19 @@
     left.appendChild(playBtn);
     left.appendChild(nextBtn);
     left.appendChild(randomBtn);
+    left.appendChild(favoriteBtn);
     left.appendChild(muteBtn);
     left.appendChild(videoControlsBtn);
+    left.appendChild(autoHideBtn);
     left.appendChild(fsBtn);
     left.appendChild(speedWrap);
-    left.appendChild(progressWrap);
     left.appendChild(videoLoopWrap);
+    left.appendChild(presentationWrap);
     left.appendChild(sel);
+    progressRow.appendChild(progressWrap);
     updateSlideshowButton(root);
     updateProgressControl(root);
+    updateFavoriteButton(root);
   }
   function saveDefaultRect(root) {
     const st = root.style;
@@ -689,13 +770,48 @@
     root.dataset.gpPlaying = '1';
     updateSlideshowButton(root);
     scheduleCurrentMedia(root, false);
+    scheduleAutoHideControls(root);
   }
   function stopSlideshow(root) {
     root.dataset.gpPlaying = '0';
     updateSlideshowButton(root);
     clearSlideshowTimer(root);
+    revealSlideshowControls(root);
     const media = currentMedia(root);
     if (media instanceof HTMLVideoElement) media.pause();
+  }
+  
+  function setAutoHideControls(root, enabled) {
+    root.dataset.gpAutoHideControls = enabled ? '1' : '0';
+    if (root.dataset.gpAutoHideWired !== '1') {
+      root.dataset.gpAutoHideWired = '1';
+      const reveal = () => {
+        revealSlideshowControls(root);
+        scheduleAutoHideControls(root);
+      };
+      root.addEventListener('pointermove', reveal, { passive: true });
+      root.addEventListener('pointerdown', reveal, { passive: true });
+      root.addEventListener('focusin', reveal);
+    }
+    revealSlideshowControls(root);
+    scheduleAutoHideControls(root);
+  }
+  
+  function revealSlideshowControls(root) {
+    clearTimeout(root._gpAutoHideTimer);
+    root._gpAutoHideTimer = null;
+    root.classList.remove('gp-controls-hidden');
+  }
+  
+  function scheduleAutoHideControls(root) {
+    clearTimeout(root._gpAutoHideTimer);
+    root._gpAutoHideTimer = null;
+    if (root.dataset.gpAutoHideControls !== '1' || root.dataset.gpPlaying !== '1') return;
+    root._gpAutoHideTimer = setTimeout(() => {
+      if (root.dataset.gpAutoHideControls === '1' && root.dataset.gpPlaying === '1') {
+        root.classList.add('gp-controls-hidden');
+      }
+    }, 2200);
   }
   
   function updateSlideshowButton(root) {
@@ -769,6 +885,7 @@
     if (!media) return;
     root._gpActiveMedia = media;
     updateProgressControl(root);
+    updateFavoriteButton(root);
     wireMediaFailureHandling(root, media);
   
     if (media instanceof HTMLVideoElement) {
@@ -894,6 +1011,110 @@
     return root.querySelector('.gp-layer.base, :scope > video, :scope > img, .gp-layer.next');
   }
   
+  function normalizePresentationMode(value) {
+    return ['all', 'favorites', 'images', 'videos'].includes(value) ? value : 'all';
+  }
+  
+  function favoriteGalleryKey(root) {
+    return root._gpGalleryFolder || '__default__';
+  }
+  
+  function mediaIdentity(source) {
+    try {
+      const url = new URL(String(source), location.href);
+      return `${url.pathname}${url.search}`;
+    } catch {
+      return String(source || '');
+    }
+  }
+  
+  function getFavoriteSet(root) {
+    const favorites = gpSettings().favoritesByGallery;
+    const entries = favorites && typeof favorites === 'object'
+      ? favorites[favoriteGalleryKey(root)]
+      : null;
+    return new Set(Array.isArray(entries) ? entries.map(String) : []);
+  }
+  
+  function isFavoriteSource(root, source) {
+    return getFavoriteSet(root).has(mediaIdentity(source));
+  }
+  
+  function updateFavoriteButton(root) {
+    const button = root.querySelector('.gp-favorite');
+    if (!(button instanceof HTMLButtonElement)) return;
+    const media = currentMedia(root);
+    const favorite = !!media && isFavoriteSource(root, media.src);
+    button.classList.toggle('active', favorite);
+    button.setAttribute('aria-pressed', String(favorite));
+    button.title = favorite ? 'Remove current item from favorites' : 'Add current item to favorites';
+    button.setAttribute('aria-label', button.title);
+    const icon = button.querySelector('[aria-hidden="true"]');
+    if (icon) icon.textContent = favorite ? '★' : '☆';
+  }
+  
+  function toggleCurrentFavorite(root) {
+    const media = currentMedia(root);
+    if (!media?.src) return;
+    const galleryKey = favoriteGalleryKey(root);
+    const allFavorites = gpSettings().favoritesByGallery;
+    const nextFavorites = allFavorites && typeof allFavorites === 'object'
+      ? { ...allFavorites }
+      : {};
+    const favorites = new Set(Array.isArray(nextFavorites[galleryKey]) ? nextFavorites[galleryKey].map(String) : []);
+    const identity = mediaIdentity(media.src);
+    if (favorites.has(identity)) favorites.delete(identity);
+    else favorites.add(identity);
+    nextFavorites[galleryKey] = [...favorites];
+    gpSaveSettings({ favoritesByGallery: nextFavorites });
+    updateFavoriteButton(root);
+    if (root.dataset.gpPresentationMode === 'favorites') {
+      applyPresentationMode(root, true);
+    }
+  }
+  
+  function filterPresentationList(root, sourceList) {
+    const mode = normalizePresentationMode(root.dataset.gpPresentationMode || gpSettings().presentationMode);
+    if (mode === 'images') return sourceList.filter(source => !isVideoSource(source));
+    if (mode === 'videos') return sourceList.filter(isVideoSource);
+    if (mode === 'favorites') {
+      const favorites = getFavoriteSet(root);
+      return sourceList.filter(source => favorites.has(mediaIdentity(source)));
+    }
+    return [...sourceList];
+  }
+  
+  function applyPresentationMode(root, navigateIfExcluded = false) {
+    const sourceList = Array.isArray(root._gpSourceGalleryList)
+      ? root._gpSourceGalleryList
+      : (Array.isArray(root._gpCanonicalGalleryList) ? root._gpCanonicalGalleryList : currentGalleryList(root));
+    const filtered = filterPresentationList(root, sourceList);
+    root._gpCanonicalGalleryList = [...filtered];
+  
+    const media = currentMedia(root);
+    const currentIndex = media ? indexInList(filtered, media.src) : -1;
+    if (root.dataset.gpRandomized === '1') {
+      const shuffled = [...filtered];
+      const current = currentIndex >= 0 ? shuffled.splice(currentIndex, 1)[0] : null;
+      shuffleInPlace(shuffled);
+      root._gpGalleryList = current ? [current, ...shuffled] : shuffled;
+    } else {
+      root._gpGalleryList = [...filtered];
+    }
+  
+    if (navigateIfExcluded && media && currentIndex < 0) {
+      if (root._gpGalleryList.length) {
+        const nextMedia = transitionTo(root, media, root._gpGalleryList[0]);
+        root._gpActiveMedia = nextMedia;
+        scheduleCurrentMedia(root, true);
+      } else {
+        stopSlideshow(root);
+      }
+    }
+    updateProgressControl(root);
+    updateFavoriteButton(root);
+  }
+  
   function toggleRandomizedGalleryOrder(root) {
     if (root.dataset.gpRandomized === '1') {
       root.dataset.gpRandomized = '0';
@@ -943,15 +1164,16 @@
   }
   
   function initializeGalleryList(root) {
-    const galleryList = readGalleryDataList();
-    root._gpGalleryList = galleryList ?? readVisibleGalleryList();
-    root._gpCanonicalGalleryList = [...root._gpGalleryList];
-    root.dataset.gpRandomized = '0';
-  
     const folderInput = document.querySelector('#gallery .gallery-folder-input');
     root._gpGalleryFolder = folderInput && 'value' in folderInput
       ? String(folderInput.value || '')
       : '';
+    root.dataset.gpPresentationMode = normalizePresentationMode(gpSettings().presentationMode);
+    const galleryList = readGalleryDataList() ?? readVisibleGalleryList();
+    root._gpSourceGalleryList = [...galleryList];
+    root._gpCanonicalGalleryList = filterPresentationList(root, galleryList);
+    root._gpGalleryList = [...root._gpCanonicalGalleryList];
+    root.dataset.gpRandomized = '0';
   
     const media = currentMedia(root);
     root._gpActiveMedia = media;
@@ -969,7 +1191,9 @@
     }
   
     scheduleGalleryListSync(root);
+    applyPresentationMode(root, true);
     updateProgressControl(root);
+    updateFavoriteButton(root);
   }
   
   function scheduleGalleryListSync(root) {
@@ -991,15 +1215,18 @@
     const updated = await fetchGalleryList(root);
     if (updated === null) return;
   
-    root._gpCanonicalGalleryList = [...updated];
+    root._gpSourceGalleryList = [...updated];
+    const filtered = filterPresentationList(root, updated);
+    root._gpCanonicalGalleryList = [...filtered];
     const current = Array.isArray(root._gpGalleryList) ? root._gpGalleryList : [];
     const next = root.dataset.gpRandomized === '1'
-      ? mergeRandomizedGalleryList(root, current, updated)
-      : updated;
+      ? mergeRandomizedGalleryList(root, current, filtered)
+      : filtered;
     if (!sameGalleryList(current, next)) {
       root._gpGalleryList = next;
     }
     updateProgressControl(root);
+    updateFavoriteButton(root);
   }
   
   function mergeRandomizedGalleryList(root, current, updated) {

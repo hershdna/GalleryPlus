@@ -9,12 +9,15 @@
 /* ===== Controls (left block) ===== */
 .gp-controls-left {
   display: flex;
+  box-sizing: border-box;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
   padding: 6px 8px 0 6px;
   user-select: none;
   z-index: 1;
+  max-height: 160px;
+  transition: opacity 180ms ease, transform 180ms ease, max-height 180ms ease, padding 180ms ease;
 }
 
 .gp-btn {
@@ -68,10 +71,13 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-width: 155px;
+  width: 100%;
+  min-width: 0;
 }
 .gp-progress {
-  width: 120px;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 60px;
   accent-color: var(--SmartThemeUnderlineColor, #7aa2f7);
 }
 .gp-progress-value {
@@ -80,6 +86,22 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   opacity: 0.9;
+}
+
+.gp-presentation-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+.gp-presentation-mode {
+  max-width: 9.5em;
+  padding: 2px 4px;
+  border-radius: 6px;
+  border: 1px solid var(--SmartThemeUnderlineColor, #7aa2f7);
+  background: transparent;
+  color: inherit;
 }
 
 .gp-transition {
@@ -297,6 +319,30 @@
   background: #000;
 }
 
+.galleryImageDraggable.draggable > .gp-progress-row {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: 100%;
+  max-height: 48px;
+  box-sizing: border-box;
+  padding: 0 70px 6px 8px;
+  background: #000;
+  z-index: 1;
+  transition: opacity 180ms ease, transform 180ms ease, max-height 180ms ease, padding 180ms ease;
+}
+
+.galleryImageDraggable.gp-controls-hidden > .gp-controls-left,
+.galleryImageDraggable.gp-controls-hidden > .gp-progress-row {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(-8px);
+}
+
 .galleryImageDraggable.draggable > img,
 .galleryImageDraggable.draggable > video,
 .galleryImageDraggable.draggable > .gp-layer-wrap {
@@ -359,7 +405,8 @@
 .gp-fullscreen .panelControlBar {
   display: none !important;
 }
-.gp-fullscreen .gp-controls-left {
+.gp-fullscreen .gp-controls-left,
+.gp-fullscreen .gp-progress-row {
   position: relative;
   top: auto;
   left: auto;

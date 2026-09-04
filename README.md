@@ -6,9 +6,11 @@ custom image ordering, and safe gallery organization.
 ## Features
 
 - Slideshow playback across the complete gallery, including paginated images
-- A live slide-position slider and current/total counter
+- A full-width slide-position slider and current/total counter below the button row
 - `.mp4`, `.mov`, and `.webm` gallery items and mixed-media slideshows
 - Previous/next, stateful play/pause and no-repeat shuffle cycles, fullscreen, timing, and Cut/Fade controls
+- Presentation modes for all media, favorites, images only, or videos only
+- Per-gallery favorites and an optional highlighted auto-hide-controls toggle
 - Global video mute and minimum video play-time controls
 - Real video-frame thumbnails and a highlighted slideshow toggle for native video controls
 - Full-image window fitting with black letterboxing instead of cropping
