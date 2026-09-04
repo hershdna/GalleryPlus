@@ -1,5 +1,7 @@
 const EXT_ID = 'GalleryPlus';
 
+export const FAVORITES_CHANGED_EVENT = 'galleryplus:favorites-changed';
+
 const DEFAULTS = {
   enabled: true,
   diag: Date.now(),
@@ -68,3 +70,46 @@ export function gpSaveSettings(partial = {}) {
     localStorage.setItem('GP_SETTINGS', JSON.stringify(merged));
   }
 }
+
+export function gpFavoriteGalleryKey(folder = '') {
+  return String(folder || '') || '__default__';
+}
+
+export function gpFavoriteIdentity(source) {
+  try {
+    const url = new URL(String(source), location.href);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return String(source || '');
+  }
+}
+
+export function gpGetFavoriteSet(folder = '') {
+  const favorites = gpSettings().favoritesByGallery;
+  const entries = favorites && typeof favorites === 'object'
+    ? favorites[gpFavoriteGalleryKey(folder)]
+    : null;
+  return new Set(Array.isArray(entries) ? entries.map(String) : []);
+}
+
+export function gpToggleFavorite(folder, source) {
+  const identity = gpFavoriteIdentity(source);
+  if (!identity) return false;
+
+  const galleryKey = gpFavoriteGalleryKey(folder);
+  const stored = gpSettings().favoritesByGallery;
+  const favoritesByGallery = stored && typeof stored === 'object' ? { ...stored } : {};
+  const favorites = new Set(Array.isArray(favoritesByGallery[galleryKey])
+    ? favoritesByGallery[galleryKey].map(String)
+    : []);
+  const favorite = !favorites.has(identity);
+  if (favorite) favorites.add(identity);
+  else favorites.delete(identity);
+  favoritesByGallery[galleryKey] = [...favorites];
+  gpSaveSettings({ favoritesByGallery });
+  document.dispatchEvent(new CustomEvent(FAVORITES_CHANGED_EVENT, {
+    detail: { galleryKey, identity, favorite },
+  }));
+  return favorite;
+}
+
