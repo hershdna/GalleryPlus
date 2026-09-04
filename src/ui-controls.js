@@ -227,43 +227,62 @@ function injectLeftControls(root, pcBar) {
   fsBtn.appendChild(fsIcon);
   fsBtn.addEventListener('click', () => toggleFullscreen(root));
 
-  // speed slider
-  const speedWrap = document.createElement('div');
+  // image slideshow delay
+  const speedWrap = document.createElement('label');
   speedWrap.className = 'gp-speed-wrap';
+  speedWrap.title = 'Image slideshow delay in seconds';
+  const speedLabel = document.createElement('span');
+  speedLabel.textContent = 'Image';
   const speed = document.createElement('input');
-  speed.type = 'range';
+  speed.type = 'number';
   speed.min = '0.1';
-  speed.max = '10';
+  speed.max = '3600';
   speed.step = '0.1';
   speed.className = 'gp-speed';
   speed.value = String(gpSettings().slideshowSpeedSec ?? 3);
-  speed.title = 'Slideshow delay (seconds)';
-  speed.setAttribute('aria-label', speed.title);
-
-  const speedValue = document.createElement('output');
-  speedValue.className = 'gp-speed-value';
-  speedValue.title = 'Time between images';
-  speedValue.setAttribute('aria-live', 'polite');
-
-  function refreshSpeedDisplay() {
-    const delay = parseFloat(speed.value || '3');
-    speedValue.textContent = `${delay.toFixed(1)}s`;
-  }
-  speed.addEventListener('input', refreshSpeedDisplay);
+  speed.setAttribute('aria-label', 'Image slideshow delay in seconds');
+  const speedUnit = document.createElement('span');
+  speedUnit.textContent = 's';
+  speed.addEventListener('input', () => {
+    const value = Number(speed.value);
+    if (Number.isFinite(value) && value >= 0.1 && value <= 3600) {
+      gpSaveSettings({ slideshowSpeedSec: value });
+    }
+  });
   speed.addEventListener('change', () => {
     let v = parseFloat(speed.value);
     if (!Number.isFinite(v) || v < 0.1) v = 0.1;
-    if (v > 10) v = 10;
+    if (v > 3600) v = 3600;
     speed.value = String(v);
     gpSaveSettings({ slideshowSpeedSec: v });
-    refreshSpeedDisplay();
     if (root.dataset.gpPlaying === '1' && !(currentMedia(root) instanceof HTMLVideoElement)) {
       scheduleCurrentMedia(root, false);
     }
   });
-  refreshSpeedDisplay();
+  speedWrap.appendChild(speedLabel);
   speedWrap.appendChild(speed);
-  speedWrap.appendChild(speedValue);
+  speedWrap.appendChild(speedUnit);
+
+  // Current slide and direct position control.
+  const progressWrap = document.createElement('label');
+  progressWrap.className = 'gp-progress-wrap';
+  progressWrap.title = 'Slideshow position';
+  const progress = document.createElement('input');
+  progress.type = 'range';
+  progress.min = '1';
+  progress.max = '1';
+  progress.step = '1';
+  progress.value = '1';
+  progress.className = 'gp-progress';
+  progress.setAttribute('aria-label', 'Slideshow position');
+  const progressValue = document.createElement('output');
+  progressValue.className = 'gp-progress-value';
+  progressValue.setAttribute('aria-live', 'polite');
+  progress.addEventListener('input', () => {
+    showGalleryIndex(root, Number(progress.value) - 1);
+  });
+  progressWrap.appendChild(progress);
+  progressWrap.appendChild(progressValue);
 
   // transition select
   const sel = document.createElement('select');
@@ -300,9 +319,11 @@ function injectLeftControls(root, pcBar) {
   left.appendChild(videoControlsBtn);
   left.appendChild(fsBtn);
   left.appendChild(speedWrap);
+  left.appendChild(progressWrap);
   left.appendChild(videoLoopWrap);
   left.appendChild(sel);
   updateSlideshowButton(root);
+  updateProgressControl(root);
 }
 function saveDefaultRect(root) {
   const st = root.style;
@@ -550,6 +571,7 @@ function scheduleCurrentMedia(root, resetVideoProgress = true) {
   const media = currentMedia(root);
   if (!media) return;
   root._gpActiveMedia = media;
+  updateProgressControl(root);
   wireMediaFailureHandling(root, media);
 
   if (media instanceof HTMLVideoElement) {
@@ -617,15 +639,16 @@ function wireMediaFailureHandling(root, media) {
 }
 
 function goNext(root) {
-  const list = currentGalleryList(root);
   const media = currentMedia(root);
+  let list = currentGalleryList(root);
   if (!media || !list.length) return;
-  const i = indexInList(list, media.src);
+  let i = indexInList(list, media.src);
+  if (root.dataset.gpRandomized === '1' && (i < 0 || i === list.length - 1)) {
+    list = beginNextShuffleCycle(root, media.src);
+    i = indexInList(list, media.src);
+  }
   const nextIdx = i >= 0 ? (i + 1) % list.length : 0;
-  const nextMedia = transitionTo(root, media, list[nextIdx]);
-  root._gpActiveMedia = nextMedia;
-  scheduleCurrentMedia(root, true);
-  preload(list[(nextIdx + 1) % list.length]);
+  showGalleryIndex(root, nextIdx);
 }
 function goPrev(root) {
   const list = currentGalleryList(root);
@@ -633,10 +656,38 @@ function goPrev(root) {
   if (!media || !list.length) return;
   const i = indexInList(list, media.src);
   const prevIdx = i >= 0 ? (i - 1 + list.length) % list.length : list.length - 1;
-  const prevMedia = transitionTo(root, media, list[prevIdx]);
-  root._gpActiveMedia = prevMedia;
+  showGalleryIndex(root, prevIdx, -1);
+}
+
+function showGalleryIndex(root, requestedIndex, preloadDirection = 1) {
+  const list = currentGalleryList(root);
+  const media = currentMedia(root);
+  if (!media || !list.length) return;
+  const index = Math.max(0, Math.min(list.length - 1, Math.trunc(requestedIndex)));
+  if (indexInList(list, media.src) === index) {
+    updateProgressControl(root);
+    return;
+  }
+  const nextMedia = transitionTo(root, media, list[index]);
+  root._gpActiveMedia = nextMedia;
   scheduleCurrentMedia(root, true);
-  preload(list[(prevIdx - 1 + list.length) % list.length]);
+  const preloadIndex = (index + preloadDirection + list.length) % list.length;
+  preload(list[preloadIndex]);
+}
+
+function updateProgressControl(root) {
+  const progress = root.querySelector('.gp-progress');
+  const output = root.querySelector('.gp-progress-value');
+  if (!(progress instanceof HTMLInputElement) || !(output instanceof HTMLOutputElement)) return;
+  const list = currentGalleryList(root);
+  const media = currentMedia(root);
+  const index = media ? indexInList(list, media.src) : -1;
+  const position = index >= 0 ? index + 1 : (list.length ? 1 : 0);
+  progress.max = String(Math.max(1, list.length));
+  progress.value = String(Math.max(1, position));
+  progress.disabled = list.length < 2;
+  progress.setAttribute('aria-valuetext', `${position} of ${list.length}`);
+  output.textContent = `${position} / ${list.length}`;
 }
 
 function currentMedia(root) {
@@ -653,6 +704,7 @@ function toggleRandomizedGalleryOrder(root) {
       ? root._gpCanonicalGalleryList
       : currentGalleryList(root);
     root._gpGalleryList = [...canonical];
+    updateProgressControl(root);
     return false;
   }
 
@@ -669,7 +721,20 @@ function toggleRandomizedGalleryOrder(root) {
   shuffleInPlace(list);
   root._gpGalleryList = current ? [current, ...list] : list;
   root.dataset.gpRandomized = '1';
+  updateProgressControl(root);
   return true;
+}
+
+function beginNextShuffleCycle(root, currentSource) {
+  const canonical = Array.isArray(root._gpCanonicalGalleryList)
+    ? [...root._gpCanonicalGalleryList]
+    : [...currentGalleryList(root)];
+  const currentIndex = indexInList(canonical, currentSource);
+  const current = currentIndex >= 0 ? canonical.splice(currentIndex, 1)[0] : null;
+  shuffleInPlace(canonical);
+  root._gpGalleryList = current ? [current, ...canonical] : canonical;
+  updateProgressControl(root);
+  return root._gpGalleryList;
 }
 
 function shuffleInPlace(items) {
@@ -707,6 +772,7 @@ function initializeGalleryList(root) {
   }
 
   scheduleGalleryListSync(root);
+  updateProgressControl(root);
 }
 
 function scheduleGalleryListSync(root) {
@@ -731,21 +797,26 @@ async function refreshGalleryList(root) {
   root._gpCanonicalGalleryList = [...updated];
   const current = Array.isArray(root._gpGalleryList) ? root._gpGalleryList : [];
   const next = root.dataset.gpRandomized === '1'
-    ? mergeRandomizedGalleryList(current, updated)
+    ? mergeRandomizedGalleryList(root, current, updated)
     : updated;
   if (!sameGalleryList(current, next)) {
     root._gpGalleryList = next;
   }
+  updateProgressControl(root);
 }
 
-function mergeRandomizedGalleryList(current, updated) {
+function mergeRandomizedGalleryList(root, current, updated) {
   const available = new Set(updated);
   const merged = current.filter(item => available.has(item));
   const included = new Set(merged);
   const added = shuffleInPlace(updated.filter(item => !included.has(item)));
+  const media = currentMedia(root);
+  const currentIndex = media ? indexInList(merged, media.src) : -1;
+  const firstUnplayedIndex = Math.max(0, currentIndex + 1);
 
   for (const item of added) {
-    const insertAt = Math.floor(Math.random() * (merged.length + 1));
+    const insertAt = firstUnplayedIndex
+      + Math.floor(Math.random() * (merged.length - firstUnplayedIndex + 1));
     merged.splice(insertAt, 0, item);
   }
   return merged;

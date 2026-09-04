@@ -171,6 +171,14 @@ function disableGalleryPageSwipe(root, gallery, attempt = 0) {
   }
 }
 
+function getPaginationPageNumber(gallery, icon) {
+  const jq = window.jQuery;
+  const stored = typeof jq === 'function' ? jq(icon)?.data?.('pageNumber') : undefined;
+  const pageNumber = Number(stored ?? icon.dataset.pageNumber);
+  if (Number.isFinite(pageNumber)) return pageNumber;
+  return [...gallery.querySelectorAll(PAGINATION_ICON_SELECTOR)].indexOf(icon);
+}
+
 function installPaginationScrubbing(root, gallery) {
   if (gallery.dataset.gpPaginationScrubbing === '1') return;
   gallery.dataset.gpPaginationScrubbing = '1';
@@ -186,14 +194,6 @@ function installPaginationScrubbing(root, gallery) {
     const target = document.elementFromPoint(x, y);
     const icon = target instanceof Element ? target.closest(PAGINATION_ICON_SELECTOR) : null;
     return icon instanceof HTMLElement && gallery.contains(icon) ? icon : null;
-  };
-
-  const pageNumberForIcon = (icon) => {
-    const jq = window.jQuery;
-    const stored = typeof jq === 'function' ? jq(icon)?.data?.('pageNumber') : undefined;
-    const pageNumber = Number(stored ?? icon.dataset.pageNumber);
-    if (Number.isFinite(pageNumber)) return pageNumber;
-    return [...gallery.querySelectorAll(PAGINATION_ICON_SELECTOR)].indexOf(icon);
   };
 
   const stopScrubbing = (event) => {
@@ -217,7 +217,7 @@ function installPaginationScrubbing(root, gallery) {
     root.classList.add('gp-pagination-scrubbing');
     const icon = paginationIconFromPoint(event.clientX, event.clientY);
     if (!icon) return;
-    const pageNumber = pageNumberForIcon(icon);
+    const pageNumber = getPaginationPageNumber(gallery, icon);
     if (pageNumber < 0 || pageNumber === lastPage) return;
     lastPage = pageNumber;
     event.preventDefault();
@@ -231,7 +231,7 @@ function installPaginationScrubbing(root, gallery) {
     pointerId = event.pointerId;
     startX = event.clientX;
     startY = event.clientY;
-    lastPage = pageNumberForIcon(icon);
+    lastPage = getPaginationPageNumber(gallery, icon);
     moved = false;
     document.addEventListener('pointermove', onPointerMove, { capture: true, passive: false });
     document.addEventListener('pointerup', stopScrubbing, true);
@@ -1191,6 +1191,18 @@ function installArchiveControl(root, gallery, sortSelect) {
 }
 
 function installReordering(root, gallery, sortSelect) {
+  let pageSwitchTimer = null;
+  let pendingPage = null;
+
+  const clearPendingPageSwitch = () => {
+    clearTimeout(pageSwitchTimer);
+    pageSwitchTimer = null;
+    pendingPage = null;
+    gallery.querySelectorAll('.gp-page-drop-target').forEach((element) => {
+      element.classList.remove('gp-page-drop-target');
+    });
+  };
+
   const decorate = () => {
     gallery.querySelectorAll('.nGY2GThumbnail').forEach((thumbnail) => {
       if (thumbnail instanceof HTMLElement) {
@@ -1216,15 +1228,35 @@ function installReordering(root, gallery, sortSelect) {
   });
 
   gallery.addEventListener('dragover', (event) => {
+    const pageIcon = event.target instanceof Element ? event.target.closest(PAGINATION_ICON_SELECTOR) : null;
+    if (pageIcon instanceof HTMLElement && root.dataset.gpDraggedFilename) {
+      event.preventDefault();
+      const pageNumber = getPaginationPageNumber(gallery, pageIcon);
+      if (pageNumber >= 0 && pageNumber !== pendingPage) {
+        clearPendingPageSwitch();
+        pendingPage = pageNumber;
+        pageIcon.classList.add('gp-page-drop-target');
+        pageSwitchTimer = setTimeout(() => {
+          if (!root.dataset.gpDraggedFilename || !pageIcon.isConnected) return;
+          pageIcon.click();
+          clearPendingPageSwitch();
+        }, 450);
+      }
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      return;
+    }
+
     const thumbnail = event.target instanceof Element ? event.target.closest('.nGY2GThumbnail') : null;
     if (!(thumbnail instanceof HTMLElement) || !root.dataset.gpDraggedFilename) return;
     event.preventDefault();
+    clearPendingPageSwitch();
     gallery.querySelectorAll('.gp-drop-target').forEach(el => el.classList.remove('gp-drop-target'));
     thumbnail.classList.add('gp-drop-target');
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
   });
 
   gallery.addEventListener('drop', (event) => {
+    clearPendingPageSwitch();
     const thumbnail = event.target instanceof Element ? event.target.closest('.nGY2GThumbnail') : null;
     const dragged = root.dataset.gpDraggedFilename || event.dataTransfer?.getData('text/plain');
     const target = thumbnail instanceof HTMLElement ? getThumbnailFilename(thumbnail) : '';
@@ -1245,13 +1277,16 @@ function installReordering(root, gallery, sortSelect) {
     refreshGallery(sortSelect);
   });
 
-  gallery.addEventListener('dragend', () => clearDragState(root, gallery));
+  gallery.addEventListener('dragend', () => {
+    clearPendingPageSwitch();
+    clearDragState(root, gallery);
+  });
 }
 
 function clearDragState(root, gallery) {
   delete root.dataset.gpDraggedFilename;
-  gallery.querySelectorAll('.gp-dragging, .gp-drop-target').forEach((el) => {
-    el.classList.remove('gp-dragging', 'gp-drop-target');
+  gallery.querySelectorAll('.gp-dragging, .gp-drop-target, .gp-page-drop-target').forEach((el) => {
+    el.classList.remove('gp-dragging', 'gp-drop-target', 'gp-page-drop-target');
   });
 }
 
