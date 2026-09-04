@@ -1581,7 +1581,11 @@
     if (!filename) return '';
   
     const visibleSource = thumbnail.querySelector('img, video')?.src || '';
-    if (visibleSource && !visibleSource.startsWith('data:')) return visibleSource;
+    const visibleFilename = filenameFromSource(visibleSource);
+    if (visibleSource && !visibleSource.startsWith('data:')
+      && (isExternalGalleryPath(filename) || visibleFilename === filename)) {
+      return visibleSource;
+    }
   
     const folder = getGalleryFolder(root);
     try {
