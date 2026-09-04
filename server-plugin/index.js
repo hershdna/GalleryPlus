@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { version } = require('./package.json');
 
-const CAPABILITIES = ['archive', 'open-folder', 'external-media'];
+const CAPABILITIES = ['archive', 'open-folder', 'external-media', 'source-folders'];
 const FRONTEND_FILES = ['manifest.json', 'index.js', 'style.css', 'settings.html'];
 const EXTENSION_HOME_PAGE = 'https://github.com/theFisher86/GalleryPlus';
 const USABLE_MEDIA_EXTENSIONS = new Set([
@@ -181,6 +181,20 @@ async function collectExternalMedia(sources) {
   return { items, errors };
 }
 
+async function listGallerySourceFolders(imagesRoot, folder) {
+  const sourceDirectory = resolveGalleryDirectory(imagesRoot, folder);
+  if (!sourceDirectory) return null;
+  const stat = await fs.promises.stat(sourceDirectory).catch(() => null);
+  if (!stat?.isDirectory()) return null;
+  const entries = await fs.promises.readdir(sourceDirectory, { withFileTypes: true });
+  return entries
+    .filter(entry => entry.isDirectory()
+      && !entry.isSymbolicLink()
+      && entry.name.toLowerCase() !== 'deprecated')
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(entry => path.join(sourceDirectory, entry.name));
+}
+
 async function init(router) {
   try {
     const frontendTarget = await syncBundledFrontend();
@@ -292,6 +306,21 @@ async function init(router) {
     }
   });
 
+  router.post('/source-folders/list', async (request, response) => {
+    try {
+      const imagesRoot = request.user?.directories?.userImages;
+      if (!imagesRoot) {
+        return response.status(500).send('The user images directory is unavailable.');
+      }
+      const folders = await listGallerySourceFolders(imagesRoot, request.body?.folder);
+      if (!folders) return response.status(404).send('Gallery source folder not found.');
+      return response.json({ folders });
+    } catch (error) {
+      console.error('[GalleryPlus] Failed to list gallery source folders', error);
+      return response.status(500).send('Failed to list gallery source folders.');
+    }
+  });
+
   const serveExternalMedia = async (tokenValue, response) => {
     const token = String(tokenValue || '');
     const filePath = externalMediaFiles.get(token);
@@ -340,5 +369,7 @@ module.exports = {
   syncFrontendFiles,
   normalizeSourceAddress,
   collectExternalMedia,
+  listGallerySourceFolders,
   externalMediaFiles,
 };
+
