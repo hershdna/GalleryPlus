@@ -11,7 +11,9 @@ const IMAGE_FILE_TYPES = ['bmp', 'gif', 'jfif', 'jpeg', 'jpg', 'png', 'webp'];
 const VIDEO_FILE_TYPES = ['mov', 'mp4', 'webm'];
 const SUPPORTED_FILE_TYPES = [...IMAGE_FILE_TYPES, ...VIDEO_FILE_TYPES];
 const EXTERNAL_CACHE_TTL_MS = 5000;
-const EXTERNAL_VALIDATION_BATCH_SIZE = 12;
+const EXTERNAL_VALIDATION_BATCH_SIZE = 6;
+const EXTERNAL_INSERT_BATCH_SIZE = 8;
+const EXTERNAL_RESIZE_INTERVAL_MS = 160;
 const EXTERNAL_MEDIA_TIMEOUT_MS = 10000;
 const EXTERNAL_STATUS_EVENT = 'galleryplus:external-media-status';
 const AUTOMATIC_SOURCES_EVENT = 'galleryplus:automatic-sources-changed';
@@ -191,17 +193,25 @@ function getAddedGalleryThumbnails(records, gallery) {
   return thumbnails;
 }
 
+function scheduleGalleryWork(callback) {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(callback, { timeout: 50 });
+    return;
+  }
+  setTimeout(callback, 16);
+}
+
 function processGalleryThumbnailsInBatches(thumbnails, root, callback) {
   const pending = [...thumbnails].filter(thumbnail => thumbnail instanceof HTMLElement);
   if (!pending.length) return;
 
   const runBatch = () => {
     if (!root.isConnected) return;
-    pending.splice(0, 48).forEach(callback);
-    if (pending.length) setTimeout(runBatch, 16);
+    pending.splice(0, 24).forEach(callback);
+    if (pending.length) scheduleGalleryWork(runBatch);
   };
-  if (pending.length <= 48) runBatch();
-  else setTimeout(runBatch, 0);
+  if (pending.length <= 24) runBatch();
+  else scheduleGalleryWork(runBatch);
 }
 
 function installGalleryFavorites(root, gallery) {
@@ -226,17 +236,9 @@ function installGalleryFavorites(root, gallery) {
 
   const decorateThumbnails = (thumbnails) => {
     const values = [...thumbnails].filter(thumbnail => thumbnail instanceof HTMLElement);
-    const unchecked = values.filter(thumbnail => thumbnail.dataset.gpFavoritePositionChecked !== '1');
-    // Read every position before changing the DOM. Alternating a computed-style
-    // read with each star insertion forces a full gallery layout per thumbnail.
-    const anchorThumbnails = new Set(unchecked.filter(
-      thumbnail => getComputedStyle(thumbnail).position === 'static',
-    ));
     const folder = getGalleryFolder(root);
     const favorites = gpGetFavoriteSet(folder);
     processGalleryThumbnailsInBatches(values, root, (thumbnail) => {
-      thumbnail.dataset.gpFavoritePositionChecked = '1';
-      if (anchorThumbnails.has(thumbnail)) thumbnail.classList.add('gp-thumbnail-favorite-anchor');
       decorateThumbnail(thumbnail, folder, favorites);
     });
   };
@@ -1442,14 +1444,21 @@ function syncOpenGalleryExternalMedia(folder, items) {
 
     const generation = (Number(root._gpExternalSyncGeneration) || 0) + 1;
     root._gpExternalSyncGeneration = generation;
+    let lastResizeAt = 0;
+    const resizeGallery = (force = false) => {
+      const now = performance.now();
+      if (!force && now - lastResizeAt < EXTERNAL_RESIZE_INTERVAL_MS) return;
+      galleryApi.nanogallery2('resize');
+      lastResizeAt = now;
+    };
     const runBatch = () => {
       if (!root.isConnected || root._gpExternalSyncGeneration !== generation) return;
-      const batch = operations.splice(0, 24);
+      const batch = operations.splice(0, EXTERNAL_INSERT_BATCH_SIZE);
       batch.forEach(operation => operation());
-      if (batch.length) galleryApi.nanogallery2('resize');
-      if (operations.length) setTimeout(runBatch, 0);
+      if (batch.length) resizeGallery(!operations.length);
+      if (operations.length) scheduleGalleryWork(runBatch);
     };
-    runBatch();
+    if (operations.length) scheduleGalleryWork(runBatch);
     return true;
   } catch (error) {
     console.warn('[GalleryPlus] Could not update the open gallery in place', error);
