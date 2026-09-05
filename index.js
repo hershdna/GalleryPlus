@@ -1603,32 +1603,78 @@
     }
   }
   
+  function getAddedGalleryThumbnails(records, gallery) {
+    const thumbnails = new Set();
+    records.forEach((record) => {
+      if (record.target instanceof Element && record.target.closest('.gp-thumbnail-favorite')) return;
+      record.addedNodes.forEach((node) => {
+        if (!(node instanceof Element) || node.closest('.gp-thumbnail-favorite')) return;
+        const containingThumbnail = node.matches('.nGY2GThumbnail')
+          ? node
+          : node.closest('.nGY2GThumbnail');
+        if (containingThumbnail instanceof HTMLElement && gallery.contains(containingThumbnail)) {
+          thumbnails.add(containingThumbnail);
+        }
+        node.querySelectorAll('.nGY2GThumbnail').forEach((thumbnail) => {
+          if (thumbnail instanceof HTMLElement) thumbnails.add(thumbnail);
+        });
+      });
+    });
+    return thumbnails;
+  }
+  
+  function processGalleryThumbnailsInBatches(thumbnails, root, callback) {
+    const pending = [...thumbnails].filter(thumbnail => thumbnail instanceof HTMLElement);
+    if (!pending.length) return;
+  
+    const runBatch = () => {
+      if (!root.isConnected) return;
+      pending.splice(0, 48).forEach(callback);
+      if (pending.length) setTimeout(runBatch, 16);
+    };
+    if (pending.length <= 48) runBatch();
+    else setTimeout(runBatch, 0);
+  }
+  
   function installGalleryFavorites(root, gallery) {
-    const refresh = () => {
+    const decorateThumbnail = (thumbnail, folder, favorites) => {
+      let button = thumbnail.querySelector(':scope > .gp-thumbnail-favorite');
+      if (!(button instanceof HTMLButtonElement)) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'gp-thumbnail-favorite';
+        button.draggable = false;
+        thumbnail.appendChild(button);
+      }
+      const source = getThumbnailFavoriteSource(root, thumbnail);
+      const favorite = Boolean(source) && favorites.has(gpFavoriteIdentity(source));
+      const icon = favorite ? '★' : '☆';
+      if (button.textContent !== icon) button.textContent = icon;
+      button.classList.toggle('active', favorite);
+      button.setAttribute('aria-pressed', String(favorite));
+      button.setAttribute('aria-label', favorite ? 'Remove from favorites' : 'Add to favorites');
+      button.title = favorite ? 'Remove from favorites' : 'Add to favorites';
+    };
+  
+    const decorateThumbnails = (thumbnails) => {
+      const values = [...thumbnails].filter(thumbnail => thumbnail instanceof HTMLElement);
+      const unchecked = values.filter(thumbnail => thumbnail.dataset.gpFavoritePositionChecked !== '1');
+      // Read every position before changing the DOM. Alternating a computed-style
+      // read with each star insertion forces a full gallery layout per thumbnail.
+      const anchorThumbnails = new Set(unchecked.filter(
+        thumbnail => getComputedStyle(thumbnail).position === 'static',
+      ));
       const folder = getGalleryFolder(root);
       const favorites = gpGetFavoriteSet(folder);
-      gallery.querySelectorAll('.nGY2GThumbnail').forEach((thumbnail) => {
-        if (!(thumbnail instanceof HTMLElement)) return;
-        if (getComputedStyle(thumbnail).position === 'static') {
-          thumbnail.classList.add('gp-thumbnail-favorite-anchor');
-        }
-        let button = thumbnail.querySelector(':scope > .gp-thumbnail-favorite');
-        if (!(button instanceof HTMLButtonElement)) {
-          button = document.createElement('button');
-          button.type = 'button';
-          button.className = 'gp-thumbnail-favorite';
-          button.draggable = false;
-          thumbnail.appendChild(button);
-        }
-        const source = getThumbnailFavoriteSource(root, thumbnail);
-        const favorite = Boolean(source) && favorites.has(gpFavoriteIdentity(source));
-        const icon = favorite ? '★' : '☆';
-        if (button.textContent !== icon) button.textContent = icon;
-        button.classList.toggle('active', favorite);
-        button.setAttribute('aria-pressed', String(favorite));
-        button.setAttribute('aria-label', favorite ? 'Remove from favorites' : 'Add to favorites');
-        button.title = favorite ? 'Remove from favorites' : 'Add to favorites';
+      processGalleryThumbnailsInBatches(values, root, (thumbnail) => {
+        thumbnail.dataset.gpFavoritePositionChecked = '1';
+        if (anchorThumbnails.has(thumbnail)) thumbnail.classList.add('gp-thumbnail-favorite-anchor');
+        decorateThumbnail(thumbnail, folder, favorites);
       });
+    };
+  
+    const refresh = () => {
+      decorateThumbnails(gallery.querySelectorAll('.nGY2GThumbnail'));
     };
   
     gallery.addEventListener('click', (event) => {
@@ -1651,7 +1697,9 @@
     };
     document.addEventListener(FAVORITES_CHANGED_EVENT, onFavoritesChanged);
   
-    const galleryObserver = new MutationObserver(refresh);
+    const galleryObserver = new MutationObserver((records) => {
+      decorateThumbnails(getAddedGalleryThumbnails(records, gallery));
+    });
     galleryObserver.observe(gallery, { childList: true, subtree: true });
     refresh();
   
@@ -3013,18 +3061,18 @@
       });
     };
   
-    const decorate = () => {
-      gallery.querySelectorAll('.nGY2GThumbnail').forEach((thumbnail) => {
-        if (thumbnail instanceof HTMLElement) {
-          thumbnail.draggable = true;
-          thumbnail.classList.add('gp-reorderable-thumbnail');
-        }
+    const decorate = (thumbnails) => {
+      processGalleryThumbnailsInBatches(thumbnails, root, (thumbnail) => {
+        thumbnail.draggable = true;
+        thumbnail.classList.add('gp-reorderable-thumbnail');
       });
     };
   
-    const observer = new MutationObserver(decorate);
+    const observer = new MutationObserver((records) => {
+      decorate(getAddedGalleryThumbnails(records, gallery));
+    });
     observer.observe(gallery, { childList: true, subtree: true });
-    decorate();
+    decorate(gallery.querySelectorAll('.nGY2GThumbnail'));
   
     gallery.addEventListener('dragstart', (event) => {
       if (event.target instanceof Element && event.target.closest('.gp-thumbnail-favorite')) {
