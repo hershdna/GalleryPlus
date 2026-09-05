@@ -1,5 +1,5 @@
 import { FAVORITES_CHANGED_EVENT, gpFavoriteGalleryKey, gpFavoriteIdentity, gpGetFavoriteSet, gpSettings, gpSaveSettings, gpToggleFavorite } from './settings.js';
-import { isVideoSource, transitionTo } from './transitions.js';
+import { isVideoSource, MEDIA_DISPLAYED_EVENT, transitionTo } from './transitions.js';
 import { getCachedExternalGalleryPaths, omitFailedExternalMedia } from './gallery-controls.js';
 
 const GALLERY_FILE_TYPES = ['bmp', 'gif', 'jfif', 'jpeg', 'jpg', 'png', 'webp', 'mov', 'mp4', 'webm'];
@@ -526,20 +526,29 @@ function wireZoomAndPan(root) {
 function wireKeyboardNav(root) {
   function handler(e) {
     if (!document.body.contains(root)) {
-      document.removeEventListener('keydown', handler);
+      window.removeEventListener('keydown', handler, true);
       return;
     }
     if (e.key === 'Escape') {
       root.querySelector('.dragClose')?.click();
       return;
     }
-    if (!e.ctrlKey || e.repeat) return;
+    if (!e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
 
-    if (e.key === 'ArrowRight') { e.preventDefault(); goNext(root); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(root); }
-    else if (e.key === ' ') { e.preventDefault(); root.dataset.gpPlaying === '1' ? stopSlideshow(root) : startSlideshow(root); }
+    let handled = true;
+    if (e.code === 'ArrowRight' || e.key === 'ArrowRight') goNext(root);
+    else if (e.code === 'ArrowLeft' || e.key === 'ArrowLeft') goPrev(root);
+    else if (e.code === 'Space' || e.key === ' ') {
+      root.dataset.gpPlaying === '1' ? stopSlideshow(root) : startSlideshow(root);
+    } else handled = false;
+
+    if (handled) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   }
-  document.addEventListener('keydown', handler);
+  // Capture before SillyTavern and browser-history handlers can consume Ctrl+Arrow.
+  window.addEventListener('keydown', handler, true);
 }
 
 function toggleFullscreen(root) {
@@ -687,6 +696,18 @@ function scheduleCurrentMedia(root, resetVideoProgress = true) {
   updateProgressControl(root);
   updateFavoriteButton(root);
   wireMediaFailureHandling(root, media);
+
+  if (media.dataset.gpTransitionPending === '1') {
+    if (root._gpPendingScheduleMedia !== media) {
+      root._gpPendingScheduleMedia = media;
+      media.addEventListener(MEDIA_DISPLAYED_EVENT, () => {
+        if (root._gpPendingScheduleMedia === media) root._gpPendingScheduleMedia = null;
+        if (currentMedia(root) === media) scheduleCurrentMedia(root, resetVideoProgress);
+      }, { once: true });
+    }
+    return;
+  }
+  if (root._gpPendingScheduleMedia === media) root._gpPendingScheduleMedia = null;
 
   if (media instanceof HTMLVideoElement) {
     configureVideo(root, media, resetVideoProgress);
