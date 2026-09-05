@@ -85,6 +85,16 @@
       nG2: { O: { paginationSwipe: true, galleryNavigationOverlayButtons: true } },
     };
     const galleryElement = document.querySelector('#dragGallery');
+    if (fixtureOptions.has('many')) {
+      const fragment = document.createDocumentFragment();
+      for (let index = 0; index < 1500; index += 1) {
+        const thumbnail = document.createElement('div');
+        thumbnail.className = 'nGY2GThumbnail';
+        thumbnail.title = `stress-${index}.svg`;
+        fragment.appendChild(thumbnail);
+      }
+      galleryElement.querySelector('.fixture-pagination').before(fragment);
+    }
     ['dragstart', 'dragover', 'drop', 'dragend'].forEach(type => {
       galleryElement.addEventListener(type, () => {
         document.body.dataset[`event${type}`] = String(Number(document.body.dataset[`event${type}`] || 0) + 1);
