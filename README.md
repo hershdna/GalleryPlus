@@ -9,13 +9,14 @@ custom image ordering, and safe gallery organization.
 - A full-width slide-position slider and current/total counter below the button row
 - `.mp4`, `.mov`, and `.webm` gallery items and mixed-media slideshows
 - Previous/next, stateful play/pause and no-repeat shuffle cycles, fullscreen, timing, and Cut/Fade controls
+- Decode-before-display transitions that keep the outgoing frame visible and prevent black flashes
 - Presentation modes for all media, favorites, images only, or videos only
 - Per-gallery favorites and an optional highlighted auto-hide-controls toggle
 - Global video mute and minimum video play-time controls
 - Real video-frame thumbnails and a highlighted slideshow toggle for native video controls
 - Full-image window fitting with black letterboxing instead of cropping
 - Slideshow playback and live image synchronization after the gallery closes
-- Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
+- Capture-safe Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
 - A **Custom** gallery sort mode with drag-and-drop thumbnail reordering
 - Cross-page reordering by holding a thumbnail over a pagination icon
 - Always-visible pagination icons that support clicking, drag-scrubbing, and mouse-wheel paging, with thumbnail-area page flipping disabled
