@@ -117,6 +117,7 @@
   }
 
   const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm'];
+  const MEDIA_DISPLAYED_EVENT = 'galleryplus:media-displayed';
   
   function isVideoSource(src) {
     try {
@@ -172,9 +173,11 @@
   }
   
   function settleCurrentMedia(root, fallbackMedia) {
-    const active = root._gpActiveMedia instanceof Element && root._gpActiveMedia.isConnected
-      ? root._gpActiveMedia
-      : fallbackMedia;
+    const active = root._gpDisplayedMedia instanceof Element && root._gpDisplayedMedia.isConnected
+      ? root._gpDisplayedMedia
+      : (root._gpActiveMedia instanceof Element && root._gpActiveMedia.isConnected
+        ? root._gpActiveMedia
+        : fallbackMedia);
     const wrap = active?.parentElement;
     if (wrap?.classList?.contains('gp-layer-wrap')) {
       wrap.querySelectorAll('.gp-layer').forEach((layer) => {
@@ -184,7 +187,10 @@
       });
       active.classList.remove('next');
       active.classList.add('base');
+      active.style.opacity = '';
+      active.style.transition = '';
     }
+    root._gpDisplayedMedia = active;
     return active;
   }
   
@@ -193,6 +199,50 @@
     const id = (Number(root._gpTransitionId) || 0) + 1;
     root._gpTransitionId = id;
     return { id, baseMedia };
+  }
+  
+  function waitForMediaReady(media) {
+    if (media instanceof HTMLImageElement) {
+      const decode = () => typeof media.decode === 'function'
+        ? media.decode().catch(() => {})
+        : Promise.resolve();
+      if (media.complete && media.naturalWidth > 0) return decode();
+      return new Promise((resolve, reject) => {
+        media.addEventListener('load', resolve, { once: true });
+        media.addEventListener('error', reject, { once: true });
+      }).then(decode);
+    }
+  
+    if (media instanceof HTMLVideoElement) {
+      if (media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        media.addEventListener('loadeddata', resolve, { once: true });
+        media.addEventListener('error', reject, { once: true });
+      });
+    }
+    return Promise.resolve();
+  }
+  
+  function discardStaleMedia(root, next) {
+    if (root._gpActiveMedia === next || root._gpDisplayedMedia === next) return;
+    if (next instanceof HTMLVideoElement) next.pause();
+    next.remove();
+  }
+  
+  function revealWhenReady(root, id, next, reveal) {
+    next.dataset.gpTransitionPending = '1';
+    void waitForMediaReady(next).then(() => {
+      if (root._gpTransitionId !== id || !next.isConnected) {
+        discardStaleMedia(root, next);
+        return;
+      }
+      delete next.dataset.gpTransitionPending;
+      reveal();
+      next.dispatchEvent(new CustomEvent(MEDIA_DISPLAYED_EVENT));
+    }).catch(() => {
+      if (root._gpTransitionId !== id) discardStaleMedia(root, next);
+      // The viewer's media error handler removes failed files and chooses another.
+    });
   }
   
   function transitionTo(root, baseMedia, nextSrc) {
@@ -205,13 +255,21 @@
   }
   
   function transitionCut(root, fallbackMedia, nextSrc) {
-    const { baseMedia } = beginTransition(root, fallbackMedia);
+    const { id, baseMedia } = beginTransition(root, fallbackMedia);
     const wrap = ensureLayerWrap(baseMedia);
     const next = createMedia(nextSrc);
-    next.className = 'gp-layer base';
-    if (baseMedia instanceof HTMLVideoElement) baseMedia.pause();
-    baseMedia.replaceWith(next);
+    next.className = 'gp-layer next';
+    next.style.opacity = '0';
+    wrap.appendChild(next);
     root._gpActiveMedia = next;
+    revealWhenReady(root, id, next, () => {
+      root._gpDisplayedMedia = next;
+      if (baseMedia instanceof HTMLVideoElement) baseMedia.pause();
+      baseMedia.remove();
+      next.classList.remove('next');
+      next.classList.add('base');
+      next.style.opacity = '';
+    });
     return next;
   }
   
@@ -221,28 +279,30 @@
     const next = createMedia(nextSrc);
     next.className = 'gp-layer next';
     next.style.opacity = '0';
-    if (baseMedia instanceof HTMLVideoElement) baseMedia.pause();
     wrap.appendChild(next);
     root._gpActiveMedia = next;
   
     const ms = getTransitionMs();
-    next.style.transition = `opacity ${ms}ms ease`;
-    requestAnimationFrame(() => { next.style.opacity = '1'; });
-    setTimeout(() => {
-      if (root._gpTransitionId !== id) {
-        if (root._gpActiveMedia !== next) {
-          if (next instanceof HTMLVideoElement) next.pause();
-          next.remove();
-        }
-        return;
-      }
+    revealWhenReady(root, id, next, () => {
+      root._gpDisplayedMedia = next;
       if (baseMedia instanceof HTMLVideoElement) baseMedia.pause();
-      baseMedia.remove();
-      next.classList.remove('next');
-      next.classList.add('base');
-      next.style.opacity = '';
-      next.style.transition = '';
-    }, ms + 30);
+      next.style.transition = `opacity ${ms}ms ease`;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => { next.style.opacity = '1'; });
+      });
+      setTimeout(() => {
+        if (root._gpTransitionId !== id) {
+          discardStaleMedia(root, next);
+          return;
+        }
+        if (baseMedia instanceof HTMLVideoElement) baseMedia.pause();
+        baseMedia.remove();
+        next.classList.remove('next');
+        next.classList.add('base');
+        next.style.opacity = '';
+        next.style.transition = '';
+      }, ms + 50);
+    });
     return next;
   }
 
@@ -770,20 +830,29 @@
   function wireKeyboardNav(root) {
     function handler(e) {
       if (!document.body.contains(root)) {
-        document.removeEventListener('keydown', handler);
+        window.removeEventListener('keydown', handler, true);
         return;
       }
       if (e.key === 'Escape') {
         root.querySelector('.dragClose')?.click();
         return;
       }
-      if (!e.ctrlKey || e.repeat) return;
+      if (!e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
   
-      if (e.key === 'ArrowRight') { e.preventDefault(); goNext(root); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(root); }
-      else if (e.key === ' ') { e.preventDefault(); root.dataset.gpPlaying === '1' ? stopSlideshow(root) : startSlideshow(root); }
+      let handled = true;
+      if (e.code === 'ArrowRight' || e.key === 'ArrowRight') goNext(root);
+      else if (e.code === 'ArrowLeft' || e.key === 'ArrowLeft') goPrev(root);
+      else if (e.code === 'Space' || e.key === ' ') {
+        root.dataset.gpPlaying === '1' ? stopSlideshow(root) : startSlideshow(root);
+      } else handled = false;
+  
+      if (handled) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
     }
-    document.addEventListener('keydown', handler);
+    // Capture before SillyTavern and browser-history handlers can consume Ctrl+Arrow.
+    window.addEventListener('keydown', handler, true);
   }
   
   function toggleFullscreen(root) {
@@ -931,6 +1000,18 @@
     updateProgressControl(root);
     updateFavoriteButton(root);
     wireMediaFailureHandling(root, media);
+  
+    if (media.dataset.gpTransitionPending === '1') {
+      if (root._gpPendingScheduleMedia !== media) {
+        root._gpPendingScheduleMedia = media;
+        media.addEventListener(MEDIA_DISPLAYED_EVENT, () => {
+          if (root._gpPendingScheduleMedia === media) root._gpPendingScheduleMedia = null;
+          if (currentMedia(root) === media) scheduleCurrentMedia(root, resetVideoProgress);
+        }, { once: true });
+      }
+      return;
+    }
+    if (root._gpPendingScheduleMedia === media) root._gpPendingScheduleMedia = null;
   
     if (media instanceof HTMLVideoElement) {
       configureVideo(root, media, resetVideoProgress);
