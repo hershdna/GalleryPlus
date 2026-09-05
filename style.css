@@ -133,9 +133,6 @@
   outline: 3px solid var(--SmartThemeUnderlineColor, #7aa2f7);
   outline-offset: -3px;
 }
-.gp-thumbnail-favorite-anchor {
-  position: relative;
-}
 .gp-thumbnail-favorite {
   position: absolute;
   top: 4px;
