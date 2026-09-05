@@ -23,6 +23,7 @@ custom image ordering, and safe gallery organization.
 - A gallery control that opens the current source folder in Windows Explorer
 - Per-gallery external file/folder addresses, including automatically linked source subfolders
 - Immediate gallery opening with validated external media populated progressively in the background
+- Incremental thumbnail controls that keep large, progressively populated galleries responsive
 - Automatic omission of missing, unreadable, corrupt, unsupported, and durationless external media
 - Per-gallery file-type filters shared by the thumbnail view and slideshow
 - Scroll-wheel or hover zoom and click-and-drag panning
