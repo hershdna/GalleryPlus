@@ -211,10 +211,10 @@
   bottom: 0;
   z-index: 12;
   box-sizing: border-box;
+  contain: paint;
   min-height: 30px;
   padding: 6px 8px;
-  background: var(--SmartThemeBlurTintColor, rgba(20, 20, 20, 0.92));
-  backdrop-filter: blur(8px);
+  background: #141414;
 }
 .gp-archive-mode.gp-busy {
   opacity: 0.55;
