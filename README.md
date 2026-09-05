@@ -18,7 +18,7 @@ custom image ordering, and safe gallery organization.
 - Ctrl+Left, Ctrl+Right, and Ctrl+Space keyboard shortcuts
 - A **Custom** gallery sort mode with drag-and-drop thumbnail reordering
 - Cross-page reordering by holding a thumbnail over a pagination icon
-- Clickable and drag-scrubbable pagination icons, with thumbnail-area page flipping disabled
+- Always-visible pagination icons that support clicking, drag-scrubbing, and mouse-wheel paging, with thumbnail-area page flipping disabled
 - Safe Remove mode that moves files to `<gallery folder>/deprecated`
 - A gallery control that opens the current source folder in Windows Explorer
 - Per-gallery external file/folder addresses, including automatically linked source subfolders
@@ -71,7 +71,9 @@ Click the link control next to the gallery folder field to open the External
 Files and Folders window. Immediate subfolders of the current source folder are
 linked automatically and marked **Auto**; `deprecated` is always excluded.
 Use **Select all** or **Select none** to enable or disable every address at once,
-or add full file and folder addresses manually. Folder addresses are scanned
+or add full file and folder addresses manually. Manually adding an automatically
+linked folder converts it to a normal manual link and takes precedence over
+future automatic discovery. Folder addresses are scanned
 recursively for supported image and video files. The addresses are saved for
 the current gallery folder, while the original files stay in place.
 Large folders are scanned and validated in the background. External entries are
