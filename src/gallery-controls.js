@@ -134,6 +134,7 @@ export function wireGallery(root) {
   installReordering(root, gallery, sortSelect);
   disableGalleryPageSwipe(root, gallery);
   installPaginationScrubbing(root, gallery);
+  installPaginationWheelNavigation(gallery);
   installFailedMediaHandling(root, gallery);
   updateCustomOrderHint(root, sortSelect);
 
@@ -336,6 +337,41 @@ function installPaginationScrubbing(root, gallery) {
   }, true);
 }
 
+function installPaginationWheelNavigation(gallery) {
+  if (gallery.dataset.gpPaginationWheel === '1') return;
+  gallery.dataset.gpPaginationWheel = '1';
+
+  let lastPageChangeAt = 0;
+  gallery.addEventListener('wheel', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const pagination = target?.closest('.nGY2GalleryBottom');
+    const hoveredIcon = target?.closest(PAGINATION_ICON_SELECTOR);
+    if ((!pagination && !hoveredIcon) || (pagination && !gallery.contains(pagination))) return;
+
+    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+    if (Math.abs(delta) < 2) return;
+    event.preventDefault();
+
+    const now = performance.now();
+    if (now - lastPageChangeAt < 180) return;
+
+    const icons = [...gallery.querySelectorAll(PAGINATION_ICON_SELECTOR)]
+      .filter(icon => icon instanceof HTMLElement);
+    const currentIndex = icons.findIndex(icon => (
+      icon.classList.contains('nGY2paginationRectangleCurrentPage')
+      || icon.classList.contains('nGY2paginationDotCurrentPage')
+      || icon.classList.contains('nGY2paginationItemCurrentPage')
+      || ['page', 'true'].includes(icon.getAttribute('aria-current'))
+    ));
+    if (currentIndex < 0) return;
+
+    const nextIndex = currentIndex + (delta > 0 ? 1 : -1);
+    if (nextIndex < 0 || nextIndex >= icons.length) return;
+    lastPageChangeAt = now;
+    icons[nextIndex].click();
+  }, { passive: false });
+}
+
 function installOpenFolderControl(root) {
   const folderInput = root.querySelector('.gallery-folder-input');
   const topBar = folderInput?.parentElement;
@@ -456,7 +492,7 @@ function installExternalSourcesControl(root) {
 
   const help = document.createElement('small');
   help.className = 'gp-external-sources-help';
-  help.textContent = 'Source subfolders are linked automatically (except deprecated). Uncheck any address to keep it saved but omit its files. Folders include supported images and videos in all subfolders.';
+  help.textContent = 'Source subfolders are linked automatically (except deprecated). Adding the same address manually overrides its Auto link. Uncheck any address to keep it saved but omit its files. Folders include supported images and videos in all subfolders.';
   panel.appendChild(help);
 
   const status = document.createElement('div');
@@ -564,16 +600,23 @@ function installExternalSourcesControl(root) {
 
   const readSourceRows = () => {
     const entries = [];
-    const seen = new Set();
+    const indexByAddress = new Map();
     sourcesList.querySelectorAll('.gp-external-source-row').forEach((row) => {
       const address = row.querySelector('.gp-external-source-address')?.value?.trim() || '';
-      if (!address || seen.has(address)) return;
-      seen.add(address);
-      entries.push({
+      if (!address) return;
+      const entry = {
         address,
         enabled: row.querySelector('.gp-external-source-enabled')?.checked !== false,
         automatic: row.dataset.gpAutomatic === '1',
-      });
+      };
+      const key = externalSourceKey(address);
+      const existingIndex = indexByAddress.get(key);
+      if (existingIndex === undefined) {
+        indexByAddress.set(key, entries.length);
+        entries.push(entry);
+      } else if (entries[existingIndex].automatic && !entry.automatic) {
+        entries[existingIndex] = entry;
+      }
     });
     return entries;
   };
@@ -899,22 +942,38 @@ function getExternalSources(folder) {
     .map(entry => entry.address);
 }
 
+function externalSourceKey(value) {
+  const address = String(value || '').trim();
+  const isWindowsPath = /^[a-z]:[\\/]/i.test(address) || /^\\\\/.test(address);
+  if (isWindowsPath) {
+    return address.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  }
+  return address.replace(/\/+$/, '');
+}
+
 function getExternalSourceEntries(folder) {
   const stored = gpSettings().externalSources?.[folder];
   if (!Array.isArray(stored)) return [];
   const entries = [];
-  const seen = new Set();
+  const indexByAddress = new Map();
   stored.forEach((value) => {
     const address = typeof value === 'string'
       ? value.trim()
       : (typeof value?.address === 'string' ? value.address.trim() : '');
-    if (!address || seen.has(address)) return;
-    seen.add(address);
-    entries.push({
+    if (!address) return;
+    const entry = {
       address,
       enabled: typeof value === 'string' || value.enabled !== false,
       automatic: typeof value !== 'string' && value.automatic === true,
-    });
+    };
+    const key = externalSourceKey(address);
+    const existingIndex = indexByAddress.get(key);
+    if (existingIndex === undefined) {
+      indexByAddress.set(key, entries.length);
+      entries.push(entry);
+    } else if (entries[existingIndex].automatic && !entry.automatic) {
+      entries[existingIndex] = entry;
+    }
   });
   return entries;
 }
@@ -922,16 +981,23 @@ function getExternalSourceEntries(folder) {
 function mergeAutomaticSourceEntries(entries, folders) {
   const automaticByAddress = new Map(entries
     .filter(entry => entry.automatic)
-    .map(entry => [entry.address, entry]));
+    .map(entry => [externalSourceKey(entry.address), entry]));
   const manual = entries.filter(entry => !entry.automatic);
-  const manualAddresses = new Set(manual.map(entry => entry.address));
-  const automatic = [...new Set(folders)]
-    .filter(address => typeof address === 'string' && address.trim() && !manualAddresses.has(address.trim()))
+  const manualAddresses = new Set(manual.map(entry => externalSourceKey(entry.address)));
+  const seenAutomatic = new Set();
+  const automatic = folders
+    .filter((address) => {
+      if (typeof address !== 'string' || !address.trim()) return false;
+      const key = externalSourceKey(address);
+      if (manualAddresses.has(key) || seenAutomatic.has(key)) return false;
+      seenAutomatic.add(key);
+      return true;
+    })
     .map((address) => {
       const normalized = address.trim();
       return {
         address: normalized,
-        enabled: automaticByAddress.get(normalized)?.enabled !== false,
+        enabled: automaticByAddress.get(externalSourceKey(normalized))?.enabled !== false,
         automatic: true,
       };
     });
