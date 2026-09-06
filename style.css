@@ -467,6 +467,41 @@
   transition: opacity 80ms ease;
 }
 
+/* Keep the native SillyTavern window affordances visible on the slideshow. */
+.galleryImageDraggable.draggable > .panelControlBar {
+  position: absolute !important;
+  top: 5px !important;
+  right: 5px !important;
+  z-index: 2000 !important;
+  display: flex !important;
+  min-width: 55px;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0 !important;
+  pointer-events: auto;
+}
+.galleryImageDraggable.draggable > .panelControlBar .drag-grabber,
+.galleryImageDraggable.draggable > .panelControlBar .dragClose {
+  display: block !important;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  color: var(--SmartThemeBodyColor, #eee);
+  opacity: 0.7;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.galleryImageDraggable.draggable > .panelControlBar .drag-grabber {
+  cursor: grab;
+}
+.galleryImageDraggable.draggable > .panelControlBar .drag-grabber:active {
+  cursor: grabbing;
+}
+.galleryImageDraggable.draggable > .panelControlBar .drag-grabber:hover,
+.galleryImageDraggable.draggable > .panelControlBar .dragClose:hover {
+  opacity: 1;
+}
+
 .galleryImageDraggable.draggable > .gp-controls-left {
   flex: 0 0 auto;
   width: 100%;
