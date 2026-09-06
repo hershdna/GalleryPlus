@@ -10,6 +10,7 @@ custom image ordering, and safe gallery organization.
 - `.mp4`, `.mov`, and `.webm` gallery items and mixed-media slideshows
 - Previous/next, stateful play/pause and no-repeat shuffle cycles, fullscreen, timing, and Cut/Fade controls
 - Decode-before-display transitions that keep the outgoing frame visible and prevent black flashes
+- Per-gallery resume checkpoints with paused resume, resume-and-play, and clear-position actions
 - Presentation modes for all media, favorites, images only, or videos only
 - Per-gallery favorites and an optional highlighted auto-hide-controls toggle
 - Global video mute and minimum video play-time controls
@@ -27,7 +28,7 @@ custom image ordering, and safe gallery organization.
 - Idle-scheduled thumbnail controls and throttled gallery relayouts that keep large, progressively populated galleries responsive
 - Automatic omission of missing, unreadable, corrupt, unsupported, and durationless external media
 - Per-gallery file-type filters shared by the thumbnail view and slideshow
-- Scroll-wheel or hover zoom and click-and-drag panning
+- Scroll-wheel or hover zoom, click-and-drag panning, and an optional Zoom Lock that carries zoom and pan across slides
 
 Short videos repeat until the configured minimum video play time is reached.
 GalleryPlus advances only after the current repetition finishes; videos longer
@@ -88,6 +89,27 @@ cannot be displayed, and videos without a usable duration, are omitted.
 Click the filter control next to the gallery folder field to open the centered
 File Types window, choose the image and video extensions to include, then click **Apply**. The selection is saved for
 the current gallery and filters both gallery thumbnails and slideshow playback.
+
+## Resuming a slideshow
+
+Opening a thumbnail always starts a fresh slideshow at that thumbnail. After a
+slideshow has been opened, the gallery toolbar shows its saved position. Click
+the Resume button to reopen there while paused, or use its menu for **Resume and
+play** or **Clear saved position**.
+
+Resume restores the presentation mode, window position and size, and a
+randomized no-repeat queue when one was active. Removed files are skipped, and
+new files are folded into the unplayed part of a randomized queue without
+interrupting playback. Images resume from the beginning of their display delay;
+videos resume from the beginning of the file.
+
+## Keeping zoom between slides
+
+Use the lock button beside the zoom control in the slideshow. When highlighted,
+the current image zoom and pan are applied to each incoming image. Turn it off
+to restore the normal behavior, where every newly displayed image starts fitted
+and centered. Video slides do not receive an image transform, but they do not
+discard the locked zoom state.
 
 ## Using custom order
 
