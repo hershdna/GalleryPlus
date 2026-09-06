@@ -1189,7 +1189,10 @@ function shuffleInPlace(items) {
 }
 
 function initializeGalleryList(root) {
-  const folderInput = document.querySelector('#gallery .gallery-folder-input');
+  const galleryRoot = root._gpGalleryRoot instanceof HTMLElement
+    ? root._gpGalleryRoot
+    : document.querySelector('#gallery');
+  const folderInput = galleryRoot?.querySelector('.gallery-folder-input');
   root._gpGalleryFolder = folderInput && 'value' in folderInput
     ? String(folderInput.value || '')
     : '';
