@@ -458,10 +458,12 @@ function disableGalleryPageSwipe(root, gallery, attempt = 0) {
     if (options) {
       options.paginationSwipe = false;
       options.galleryNavigationOverlayButtons = false;
+      options.thumbnailOpenImage = false;
     }
     if (runtimeOptions) {
       runtimeOptions.paginationSwipe = false;
       runtimeOptions.galleryNavigationOverlayButtons = false;
+      runtimeOptions.thumbnailOpenImage = false;
     }
     root.dataset.gpPageSwipeDisabled = '1';
     return;
