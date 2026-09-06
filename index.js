@@ -4,6 +4,10 @@
   const EXT_ID = 'GalleryPlus';
   
   const FAVORITES_CHANGED_EVENT = 'galleryplus:favorites-changed';
+  const RESUME_SESSION_CHANGED_EVENT = 'galleryplus:resume-session-changed';
+  const RESUME_STORAGE_KEY = 'GalleryPlus.resumeSessions.v1';
+  let resumeSessionMemory = {};
+  let pendingResumeRequest = null;
   
   const DEFAULTS = {
     enabled: true,
@@ -11,6 +15,7 @@
     openHeight: 800,
     hoverZoom: false,
     hoverZoomScale: 1.08,
+    zoomLock: false,
     viewerRect: null,
     masonryDense: false,
     showCaptions: true,
@@ -114,6 +119,66 @@
       detail: { galleryKey, identity, favorite },
     }));
     return favorite;
+  }
+  
+  function readResumeSessions() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(RESUME_STORAGE_KEY) || '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        resumeSessionMemory = parsed;
+      }
+    } catch {
+      // Use the in-memory copy if storage is unavailable or corrupt.
+    }
+    return resumeSessionMemory;
+  }
+  
+  function writeResumeSessions(sessions) {
+    resumeSessionMemory = sessions;
+    try {
+      localStorage.setItem(RESUME_STORAGE_KEY, JSON.stringify(sessions));
+    } catch (error) {
+      console.warn('[GalleryPlus] Could not persist the complete resume session', error);
+    }
+  }
+  
+  function gpGetResumeSession(folder = '') {
+    const session = readResumeSessions()[gpFavoriteGalleryKey(folder)];
+    return session && typeof session === 'object' ? session : null;
+  }
+  
+  function gpSaveResumeSession(folder, session) {
+    const galleryKey = gpFavoriteGalleryKey(folder);
+    const sessions = { ...readResumeSessions(), [galleryKey]: session };
+    writeResumeSessions(sessions);
+    document.dispatchEvent(new CustomEvent(RESUME_SESSION_CHANGED_EVENT, {
+      detail: { galleryKey, session },
+    }));
+  }
+  
+  function gpClearResumeSession(folder = '') {
+    const galleryKey = gpFavoriteGalleryKey(folder);
+    const sessions = { ...readResumeSessions() };
+    delete sessions[galleryKey];
+    writeResumeSessions(sessions);
+    document.dispatchEvent(new CustomEvent(RESUME_SESSION_CHANGED_EVENT, {
+      detail: { galleryKey, session: null },
+    }));
+  }
+  
+  function gpQueueResumeRequest(folder, autoPlay = false) {
+    pendingResumeRequest = {
+      galleryKey: gpFavoriteGalleryKey(folder),
+      autoPlay: Boolean(autoPlay),
+      expiresAt: Date.now() + 5000,
+    };
+  }
+  
+  function gpConsumeResumeRequest(folder) {
+    const request = pendingResumeRequest;
+    pendingResumeRequest = null;
+    if (!request || request.expiresAt < Date.now()) return null;
+    return request.galleryKey === gpFavoriteGalleryKey(folder) ? request : null;
   }
 
   const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm'];
@@ -238,7 +303,7 @@
       }
       delete next.dataset.gpTransitionPending;
       reveal();
-      next.dispatchEvent(new CustomEvent(MEDIA_DISPLAYED_EVENT));
+      next.dispatchEvent(new CustomEvent(MEDIA_DISPLAYED_EVENT, { bubbles: true }));
     }).catch(() => {
       if (root._gpTransitionId !== id) discardStaleMedia(root, next);
       // The viewer's media error handler removes failed files and chooses another.
@@ -310,13 +375,13 @@
   const MEDIA_LOAD_TIMEOUT_MS = 10000;
   
   function wireViewer(root) {
-    if (!root || root.dataset.gpWired === '1') return;
+    if (!root || root.dataset.gpWired === '1' || root.dataset.gpWiring === '1') return;
   
     const pcBar = root.querySelector('.panelControlBar');
     if (!pcBar) return;
   
+    root.dataset.gpWiring = '1';
     injectLeftControls(root, pcBar);
-    root.dataset.gpWired = '1';
   
     const setupSteps = [
       ['gallery list', initializeGalleryList],
@@ -333,6 +398,30 @@
         console.error(`[GalleryPlus] Failed to initialize ${name}`, error);
       }
     }
+  
+    let resumedMedia = null;
+    try {
+      resumedMedia = restorePendingResumeSession(root);
+    } catch (error) {
+      console.error('[GalleryPlus] Failed to restore slideshow position', error);
+    }
+    wireResumeCheckpointing(root);
+  
+    const revealViewer = () => {
+      root.dataset.gpWired = '1';
+      root.dataset.gpResuming = '0';
+      queueResumeCheckpoint(root);
+    };
+    if (resumedMedia?.dataset.gpTransitionPending === '1') {
+      root.dataset.gpResuming = '1';
+      root.addEventListener(MEDIA_DISPLAYED_EVENT, revealViewer, { once: true });
+      setTimeout(() => {
+        if (root.dataset.gpWired !== '1') revealViewer();
+      }, MEDIA_LOAD_TIMEOUT_MS);
+    } else {
+      revealViewer();
+    }
+    delete root.dataset.gpWiring;
   }
   
   function injectLeftControls(root, pcBar) {
@@ -382,6 +471,29 @@
       gpSaveSettings({ hoverZoom: ns });
       zoomBtn.classList.toggle('active', ns);
     });
+  
+    // 🔓 keep image zoom and pan when progressing to another slide
+    const zoomLockBtn = document.createElement('button');
+    zoomLockBtn.className = 'gp-btn gp-zoom-lock';
+    const zoomLockIcon = document.createElement('span');
+    zoomLockIcon.setAttribute('aria-hidden', 'true');
+    zoomLockBtn.appendChild(zoomLockIcon);
+    const refreshZoomLockButton = () => {
+      const locked = !!gpSettings().zoomLock;
+      const label = locked
+        ? 'Unlock zoom reset between slides'
+        : 'Lock zoom and pan across slides';
+      zoomLockBtn.classList.toggle('active', locked);
+      zoomLockBtn.setAttribute('aria-pressed', String(locked));
+      zoomLockBtn.title = label;
+      zoomLockBtn.setAttribute('aria-label', label);
+      zoomLockIcon.textContent = locked ? '🔒' : '🔓';
+    };
+    zoomLockBtn.addEventListener('click', () => {
+      gpSaveSettings({ zoomLock: !gpSettings().zoomLock });
+      refreshZoomLockButton();
+    });
+    refreshZoomLockButton();
   
     function stepSlideshow(direction) {
       if (direction < 0) goPrev(root); else goNext(root);
@@ -442,6 +554,7 @@
       const randomized = toggleRandomizedGalleryOrder(root);
       randomBtn.classList.toggle('active', randomized);
       randomBtn.setAttribute('aria-pressed', String(randomized));
+      queueResumeCheckpoint(root);
     });
   
     // ⭐ favorite the current item for this gallery
@@ -480,6 +593,7 @@
       gpSaveSettings({ presentationMode: mode });
       root.dataset.gpPresentationMode = mode;
       applyPresentationMode(root, true);
+      queueResumeCheckpoint(root);
     });
     presentationWrap.appendChild(presentationLabel);
     presentationWrap.appendChild(presentation);
@@ -689,6 +803,7 @@
   
     left.appendChild(saveBtn);
     left.appendChild(zoomBtn);
+    left.appendChild(zoomLockBtn);
     left.appendChild(prevBtn);
     left.appendChild(playBtn);
     left.appendChild(nextBtn);
@@ -725,6 +840,172 @@
     if (!r) return;
     const st = root.style;
     st.top = r.top; st.left = r.left; st.width = r.width; st.height = r.height;
+  }
+  
+  function resumeSourceKey(source) {
+    try {
+      return new URL(String(source), location.href).href;
+    } catch {
+      return String(source || '');
+    }
+  }
+  
+  function nextAvailableResumeSource(session, available) {
+    const savedOrder = Array.isArray(session?.order) ? session.order : [];
+    if (!savedOrder.length) return '';
+    const currentKey = resumeSourceKey(session.currentSource);
+    const savedIndex = savedOrder.findIndex(source => resumeSourceKey(source) === currentKey);
+    for (let offset = 0; offset < savedOrder.length; offset += 1) {
+      const index = (Math.max(0, savedIndex) + offset) % savedOrder.length;
+      const match = available.get(resumeSourceKey(savedOrder[index]));
+      if (match) return match;
+    }
+    return '';
+  }
+  
+  function reconcileResumeOrder(root, session) {
+    const canonical = filterPresentationList(root, root._gpSourceGalleryList || []);
+    root._gpCanonicalGalleryList = [...canonical];
+    const available = new Map(canonical.map(source => [resumeSourceKey(source), source]));
+    const savedOrder = Array.isArray(session.order) ? session.order : [];
+    const seen = new Set();
+    const surviving = [];
+    savedOrder.forEach((source) => {
+      const key = resumeSourceKey(source);
+      const current = available.get(key);
+      if (current && !seen.has(key)) {
+        seen.add(key);
+        surviving.push(current);
+      }
+    });
+    const added = canonical.filter(source => !seen.has(resumeSourceKey(source)));
+    let target = available.get(resumeSourceKey(session.currentSource))
+      || (session.randomized
+        ? nextAvailableResumeSource(session, available)
+        : canonical[Math.min(canonical.length - 1, Math.max(0, Number(session.position) - 1))])
+      || canonical[0]
+      || '';
+  
+    if (session.randomized && canonical.length > 1) {
+      const order = [...surviving];
+      if (target && !order.some(source => resumeSourceKey(source) === resumeSourceKey(target))) {
+        order.unshift(target);
+      }
+      let targetIndex = order.findIndex(source => resumeSourceKey(source) === resumeSourceKey(target));
+      if (targetIndex < 0) targetIndex = 0;
+      shuffleInPlace(added);
+      added.forEach((source) => {
+        const firstUnplayed = Math.min(order.length, targetIndex + 1);
+        const insertAt = firstUnplayed + Math.floor(Math.random() * (order.length - firstUnplayed + 1));
+        order.splice(insertAt, 0, source);
+      });
+      root._gpGalleryList = order;
+      root.dataset.gpRandomized = '1';
+    } else {
+      root._gpGalleryList = [...canonical];
+      root.dataset.gpRandomized = '0';
+      target = available.get(resumeSourceKey(target)) || canonical[0] || '';
+    }
+    return target;
+  }
+  
+  function restorePendingResumeSession(root) {
+    const request = gpConsumeResumeRequest(root._gpGalleryFolder);
+    if (!request) return null;
+    const session = gpGetResumeSession(root._gpGalleryFolder);
+    if (!session) return null;
+  
+    const mode = normalizePresentationMode(session.presentationMode);
+    root.dataset.gpPresentationMode = mode;
+    const presentation = root.querySelector('.gp-presentation-mode');
+    if (presentation instanceof HTMLSelectElement) presentation.value = mode;
+    const target = reconcileResumeOrder(root, session);
+    const randomButton = root.querySelector('.gp-random');
+    if (randomButton instanceof HTMLButtonElement) {
+      const randomized = root.dataset.gpRandomized === '1';
+      randomButton.classList.toggle('active', randomized);
+      randomButton.setAttribute('aria-pressed', String(randomized));
+    }
+  
+    const rect = session.rect;
+    if (rect && typeof rect === 'object') {
+      ['top', 'left', 'width', 'height'].forEach((property) => {
+        if (typeof rect[property] === 'string') root.style[property] = rect[property];
+      });
+    }
+    root.dataset.gpPlaying = request.autoPlay ? '1' : '0';
+    updateSlideshowButton(root);
+    updateProgressControl(root);
+    if (!target) return null;
+  
+    const media = currentMedia(root);
+    if (!media) return null;
+    if (resumeSourceKey(media.src) === resumeSourceKey(target)) {
+      root._gpActiveMedia = media;
+      root._gpDisplayedMedia = media;
+      scheduleCurrentMedia(root, true);
+      return media;
+    }
+    const nextMedia = transitionTo(root, media, target);
+    root._gpActiveMedia = nextMedia;
+    scheduleCurrentMedia(root, true);
+    return nextMedia;
+  }
+  
+  function resumeWindowRect(root) {
+    const previous = gpGetResumeSession(root._gpGalleryFolder)?.rect;
+    if (document.fullscreenElement === root || root.classList.contains('gp-fullscreen')) return previous || null;
+    const bounds = root.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return previous || null;
+    return {
+      top: `${Math.round(bounds.top)}px`,
+      left: `${Math.round(bounds.left)}px`,
+      width: `${Math.round(bounds.width)}px`,
+      height: `${Math.round(bounds.height)}px`,
+    };
+  }
+  
+  function saveResumeCheckpoint(root) {
+    clearTimeout(root._gpResumeSaveTimer);
+    root._gpResumeSaveTimer = null;
+    if (root.dataset.gpResuming === '1') return;
+    const media = currentMedia(root);
+    const list = [...currentGalleryList(root)];
+    if (!media?.src || !list.length) return;
+    const index = indexInList(list, media.src);
+    const randomized = root.dataset.gpRandomized === '1';
+    gpSaveResumeSession(root._gpGalleryFolder, {
+      currentSource: media.src,
+      order: randomized ? list : [],
+      randomized,
+      presentationMode: normalizePresentationMode(root.dataset.gpPresentationMode),
+      playing: root.dataset.gpPlaying === '1',
+      position: index >= 0 ? index + 1 : 1,
+      count: list.length,
+      rect: resumeWindowRect(root),
+      savedAt: Date.now(),
+    });
+  }
+  
+  function queueResumeCheckpoint(root, immediate = false) {
+    clearTimeout(root._gpResumeSaveTimer);
+    if (immediate) {
+      saveResumeCheckpoint(root);
+      return;
+    }
+    root._gpResumeSaveTimer = setTimeout(() => saveResumeCheckpoint(root), 350);
+  }
+  
+  function wireResumeCheckpointing(root) {
+    if (root.dataset.gpResumeCheckpointWired === '1') return;
+    root.dataset.gpResumeCheckpointWired = '1';
+    root.addEventListener('pointerup', () => queueResumeCheckpoint(root));
+    const beforeUnload = () => saveResumeCheckpoint(root);
+    root.querySelector('.dragClose')?.addEventListener('click', () => {
+      queueResumeCheckpoint(root, true);
+      window.removeEventListener('beforeunload', beforeUnload);
+    }, true);
+    window.addEventListener('beforeunload', beforeUnload);
   }
   
   function wireZoomAndPan(root) {
@@ -823,6 +1104,18 @@
     root.addEventListener('mousemove', onMoveHover);
     root.addEventListener('mouseleave', onLeaveHover);
     root.addEventListener('mousedown', onMouseDown);
+    root.addEventListener(MEDIA_DISPLAYED_EVENT, (event) => {
+      if (!(event.target instanceof HTMLImageElement)) {
+        if (!gpSettings().zoomLock) {
+          scale = 1; tx = 0; ty = 0;
+        }
+        return;
+      }
+      if (!gpSettings().zoomLock) {
+        scale = 1; tx = 0; ty = 0;
+      }
+      applyTransform();
+    });
   
     applyTransform();
   }
@@ -884,6 +1177,7 @@
     updateSlideshowButton(root);
     scheduleCurrentMedia(root, false);
     scheduleAutoHideControls(root);
+    queueResumeCheckpoint(root);
   }
   function stopSlideshow(root) {
     root.dataset.gpPlaying = '0';
@@ -892,6 +1186,7 @@
     revealSlideshowControls(root);
     const media = currentMedia(root);
     if (media instanceof HTMLVideoElement) media.pause();
+    queueResumeCheckpoint(root);
   }
   
   function setAutoHideControls(root, enabled) {
@@ -1012,6 +1307,7 @@
       return;
     }
     if (root._gpPendingScheduleMedia === media) root._gpPendingScheduleMedia = null;
+    queueResumeCheckpoint(root);
   
     if (media instanceof HTMLVideoElement) {
       configureVideo(root, media, resetVideoProgress);
@@ -1644,6 +1940,7 @@
     installOpenFolderControl(root);
     installExternalSourcesControl(root);
     installFileTypeFilterControl(root, sortSelect);
+    installResumeSlideshowControl(root, gallery);
     installGalleryFavorites(root, gallery);
     installArchiveControl(root, gallery, sortSelect);
     installReordering(root, gallery, sortSelect);
@@ -1988,6 +2285,96 @@
     const folderAccept = topBar.querySelector('.fa-check');
     if (folderAccept) folderAccept.insertAdjacentElement('afterend', button);
     else topBar.appendChild(button);
+  }
+  
+  function installResumeSlideshowControl(root, gallery) {
+    const folderInput = root.querySelector('.gallery-folder-input');
+    const topBar = folderInput?.parentElement;
+    if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-resume-wrap')) return;
+  
+    const wrap = document.createElement('span');
+    wrap.className = 'gp-resume-wrap';
+  
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'menu_button gp-resume-slideshow';
+  
+    const options = document.createElement('select');
+    options.className = 'gp-resume-options';
+    options.title = 'Resume slideshow options';
+    options.setAttribute('aria-label', options.title);
+    [
+      ['', '▾'],
+      ['play', 'Resume and play'],
+      ['clear', 'Clear saved position'],
+    ].forEach(([value, label]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      options.appendChild(option);
+    });
+  
+    const getFolder = () => getGalleryFolder(root);
+    const update = () => {
+      const session = gpGetResumeSession(getFolder());
+      const position = Math.max(1, Number(session?.position) || 1);
+      const count = Math.max(position, Number(session?.count) || 0);
+      button.disabled = !session;
+      options.disabled = !session;
+      button.textContent = session ? `↻ ${position}/${count}` : '↻ Resume';
+      button.title = session
+        ? `Resume slideshow at ${position} of ${count} (paused)`
+        : 'No saved slideshow position for this gallery';
+      button.setAttribute('aria-label', button.title);
+    };
+  
+    const resume = (autoPlay) => {
+      const folder = getFolder();
+      if (!gpGetResumeSession(folder)) return;
+      const thumbnail = gallery.querySelector('.nGY2GThumbnail');
+      if (!(thumbnail instanceof HTMLElement)) {
+        notify('info', 'The gallery needs at least one visible thumbnail before it can resume.');
+        return;
+      }
+      gpQueueResumeRequest(folder, autoPlay);
+      const target = thumbnail.querySelector('img, video, .nGY2GThumbnailImage') || thumbnail;
+      target.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      }));
+    };
+  
+    button.addEventListener('click', () => resume(false));
+    options.addEventListener('change', () => {
+      const action = options.value;
+      options.value = '';
+      if (action === 'play') resume(true);
+      else if (action === 'clear') {
+        gpClearResumeSession(getFolder());
+        notify('success', 'Saved slideshow position cleared.');
+      }
+    });
+    const onResumeChanged = (event) => {
+      if (event.detail?.galleryKey === gpFavoriteGalleryKey(getFolder())) update();
+    };
+    document.addEventListener(RESUME_SESSION_CHANGED_EVENT, onResumeChanged);
+  
+    wrap.append(button, options);
+    const fileTypes = topBar.querySelector('.gp-file-types-button');
+    const externalSources = topBar.querySelector('.gp-external-sources-button');
+    const openFolder = topBar.querySelector('.gp-open-folder');
+    const anchor = fileTypes || externalSources || openFolder;
+    if (anchor) anchor.insertAdjacentElement('afterend', wrap);
+    else topBar.appendChild(wrap);
+    update();
+  
+    const lifecycleObserver = new MutationObserver(() => {
+      if (document.body.contains(root)) return;
+      document.removeEventListener(RESUME_SESSION_CHANGED_EVENT, onResumeChanged);
+      lifecycleObserver.disconnect();
+    });
+    lifecycleObserver.observe(document.body, { childList: true, subtree: true });
   }
   
   function installExternalSourcesControl(root) {
