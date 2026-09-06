@@ -191,6 +191,12 @@
   border-color: #ffd54a;
   box-shadow: 0 0 7px rgba(255, 213, 74, 0.7);
 }
+#dragGallery .nGY2GThumbnailTitle,
+#dragGallery .nGY2GThumbnailImageTitle,
+#dragGallery .nGY2GThumbnailLabel,
+#dragGallery .nGY2GThumbnailDescription {
+  display: none !important;
+}
 .gp-page-drop-target {
   box-shadow: 0 0 0 3px var(--SmartThemeUnderlineColor, #7aa2f7),
     0 0 14px var(--SmartThemeUnderlineColor, #7aa2f7) !important;
