@@ -19,6 +19,7 @@ export function wireViewer(root) {
     ['zoom and pan', wireZoomAndPan],
     ['keyboard navigation', wireKeyboardNav],
     ['default viewer position', applyDefaultRect],
+    ['window repositioning', wireWindowDrag],
     ['fullscreen state', wireFullscreenStateSync],
   ];
 
@@ -777,6 +778,65 @@ function wireKeyboardNav(root) {
   }
   // Capture before SillyTavern and browser-history handlers can consume Ctrl+Arrow.
   window.addEventListener('keydown', handler, true);
+}
+
+function wireWindowDrag(root) {
+  if (root.dataset.gpDirectSlideshow !== '1') return;
+  const handle = root.querySelector('.drag-grabber');
+  if (!(handle instanceof HTMLElement) || handle.dataset.gpDragWired === '1') return;
+  handle.dataset.gpDragWired = '1';
+
+  let pointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  const stop = (event) => {
+    if (pointerId === null || (event && event.pointerId !== pointerId)) return;
+    pointerId = null;
+    document.removeEventListener('pointermove', move, true);
+    document.removeEventListener('pointerup', stop, true);
+    document.removeEventListener('pointercancel', stop, true);
+    root.classList.remove('gp-window-dragging');
+  };
+
+  const move = (event) => {
+    if (pointerId === null || event.pointerId !== pointerId) return;
+    event.preventDefault();
+    const nextLeft = Math.max(0, Math.min(
+      window.innerWidth - Math.min(root.offsetWidth, window.innerWidth),
+      startLeft + event.clientX - startX,
+    ));
+    const nextTop = Math.max(0, Math.min(
+      window.innerHeight - Math.min(root.offsetHeight, window.innerHeight),
+      startTop + event.clientY - startY,
+    ));
+    root.style.left = `${Math.round(nextLeft)}px`;
+    root.style.top = `${Math.round(nextTop)}px`;
+    root.style.right = 'auto';
+    root.style.bottom = 'auto';
+  };
+
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || pointerId !== null) return;
+    const bounds = root.getBoundingClientRect();
+    pointerId = event.pointerId;
+    startX = event.clientX;
+    startY = event.clientY;
+    startLeft = bounds.left;
+    startTop = bounds.top;
+    root.style.position = 'fixed';
+    root.style.left = `${Math.round(startLeft)}px`;
+    root.style.top = `${Math.round(startTop)}px`;
+    root.style.right = 'auto';
+    root.style.bottom = 'auto';
+    root.classList.add('gp-window-dragging');
+    event.preventDefault();
+    document.addEventListener('pointermove', move, { capture: true, passive: false });
+    document.addEventListener('pointerup', stop, true);
+    document.addEventListener('pointercancel', stop, true);
+  });
 }
 
 function toggleFullscreen(root) {
