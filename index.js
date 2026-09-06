@@ -2331,11 +2331,13 @@
         options.paginationSwipe = false;
         options.galleryNavigationOverlayButtons = false;
         options.thumbnailOpenImage = false;
+        options.fnThumbnailOpen = () => {};
       }
       if (runtimeOptions) {
         runtimeOptions.paginationSwipe = false;
         runtimeOptions.galleryNavigationOverlayButtons = false;
         runtimeOptions.thumbnailOpenImage = false;
+        runtimeOptions.fnThumbnailOpen = () => {};
       }
       root.dataset.gpPageSwipeDisabled = '1';
       return;
@@ -2663,9 +2665,15 @@
     selectNoneButton.className = 'menu_button gp-external-source-select-none';
     selectNoneButton.textContent = 'Select none';
   
+    const refreshButton = document.createElement('button');
+    refreshButton.type = 'button';
+    refreshButton.className = 'menu_button gp-external-source-refresh';
+    refreshButton.textContent = 'Refresh subfolders';
+    refreshButton.title = 'Rescan immediate subfolders';
+  
     const sourceActions = document.createElement('div');
     sourceActions.className = 'gp-external-source-actions';
-    sourceActions.append(addSourceButton, selectAllButton, selectNoneButton);
+    sourceActions.append(addSourceButton, selectAllButton, selectNoneButton, refreshButton);
     label.appendChild(sourceActions);
     panel.appendChild(label);
   
@@ -2808,12 +2816,33 @@
       const entries = readSourceRows();
       status.textContent = `${entries.filter(entry => entry.enabled).length} of ${entries.length} address${entries.length === 1 ? '' : 'es'} enabled.`;
     };
+    const refreshAutomaticRows = async (force = false) => {
+      if (dialog.dataset.gpDirty === '1') {
+        status.textContent = 'Apply your current changes before refreshing subfolders.';
+        return;
+      }
+      refreshButton.disabled = true;
+      status.textContent = 'Scanning immediate source subfolders…';
+      try {
+        const updatedEntries = await syncAutomaticSourceFolders(root, force);
+        if (!dialog.open || dialog.dataset.gpDirty === '1') return;
+        const latest = Array.isArray(updatedEntries)
+          ? updatedEntries
+          : getExternalSourceEntries(getGalleryFolder(root));
+        renderSourceRows(latest);
+        const latestEnabled = latest.filter(entry => entry.enabled !== false).length;
+        status.textContent = `${latestEnabled} of ${latest.length} address${latest.length === 1 ? '' : 'es'} enabled.`;
+      } finally {
+        refreshButton.disabled = false;
+      }
+    };
     addSourceButton.addEventListener('click', () => {
       dialog.dataset.gpDirty = '1';
       addSourceRow().focus();
     });
     selectAllButton.addEventListener('click', () => setAllSourcesEnabled(true));
     selectNoneButton.addEventListener('click', () => setAllSourcesEnabled(false));
+    refreshButton.addEventListener('click', () => { void refreshAutomaticRows(true); });
     const openWindow = () => {
       document.querySelectorAll('.gp-file-types-window[open]').forEach((fileTypes) => {
         if (typeof fileTypes.close === 'function') fileTypes.close();
@@ -2831,15 +2860,7 @@
       button.classList.add('active');
       button.setAttribute('aria-expanded', 'true');
       requestAnimationFrame(() => sourcesList.querySelector('.gp-external-source-address')?.focus());
-      void syncAutomaticSourceFolders(root).then((updatedEntries) => {
-        if (!dialog.open || dialog.dataset.gpDirty === '1') return;
-        const latest = Array.isArray(updatedEntries)
-          ? updatedEntries
-          : getExternalSourceEntries(folder);
-        renderSourceRows(latest);
-        const latestEnabled = latest.filter(entry => entry.enabled !== false).length;
-        status.textContent = `${latestEnabled} of ${latest.length} address${latest.length === 1 ? '' : 'es'} enabled.`;
-      });
+      void refreshAutomaticRows(false);
     };
   
     button.addEventListener('click', openWindow);
@@ -3203,10 +3224,11 @@
     gpSaveSettings({ externalSources });
   }
   
-  async function syncAutomaticSourceFolders(root) {
+  async function syncAutomaticSourceFolders(root, force = false) {
     const folder = getGalleryFolder(root);
     if (!folder) return [];
-    if (automaticSourceLoads.has(folder)) return automaticSourceLoads.get(folder);
+    if (!force && automaticSourceLoads.has(folder)) return automaticSourceLoads.get(folder);
+    if (force) automaticSourceLoads.delete(folder);
   
     const load = (async () => {
       try {
