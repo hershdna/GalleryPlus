@@ -72,14 +72,16 @@ the server plugin to open that gallery's source directory in Windows Explorer.
 ## Adding files from other locations
 
 Click the link control next to the gallery folder field to open the External
-Files and Folders window. Immediate subfolders of the current source folder are
-linked automatically and marked **Auto**; `deprecated` is always excluded.
+Files and Folders window. Subfolders of the current source folder are listed
+automatically and marked **Auto**; `deprecated` is always excluded.
 Use **Select all** or **Select none** to enable or disable every address at once,
 or add full file and folder addresses manually. Manually adding an automatically
 linked folder converts it to a normal manual link and takes precedence over
-future automatic discovery. Folder addresses are scanned
-recursively for supported image and video files. The addresses are saved for
-the current gallery folder, while the original files stay in place.
+future automatic discovery. Folder addresses contribute supported image and
+video files directly inside the selected folder. Its subfolders are offered
+as selectable **Auto** links, so nested folders are only included when enabled
+in the menu. The addresses are saved for the current gallery folder, while the
+original files stay in place.
 Large folders are scanned and validated in the background. External entries are
 never included in SillyTavern's blocking window-opening request, so the gallery
 opens with local items first and adds playable media in small batches. Files that
