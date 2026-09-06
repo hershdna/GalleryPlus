@@ -388,6 +388,7 @@
       ['zoom and pan', wireZoomAndPan],
       ['keyboard navigation', wireKeyboardNav],
       ['default viewer position', applyDefaultRect],
+      ['window repositioning', wireWindowDrag],
       ['fullscreen state', wireFullscreenStateSync],
     ];
   
@@ -1146,6 +1147,65 @@
     }
     // Capture before SillyTavern and browser-history handlers can consume Ctrl+Arrow.
     window.addEventListener('keydown', handler, true);
+  }
+  
+  function wireWindowDrag(root) {
+    if (root.dataset.gpDirectSlideshow !== '1') return;
+    const handle = root.querySelector('.drag-grabber');
+    if (!(handle instanceof HTMLElement) || handle.dataset.gpDragWired === '1') return;
+    handle.dataset.gpDragWired = '1';
+  
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+  
+    const stop = (event) => {
+      if (pointerId === null || (event && event.pointerId !== pointerId)) return;
+      pointerId = null;
+      document.removeEventListener('pointermove', move, true);
+      document.removeEventListener('pointerup', stop, true);
+      document.removeEventListener('pointercancel', stop, true);
+      root.classList.remove('gp-window-dragging');
+    };
+  
+    const move = (event) => {
+      if (pointerId === null || event.pointerId !== pointerId) return;
+      event.preventDefault();
+      const nextLeft = Math.max(0, Math.min(
+        window.innerWidth - Math.min(root.offsetWidth, window.innerWidth),
+        startLeft + event.clientX - startX,
+      ));
+      const nextTop = Math.max(0, Math.min(
+        window.innerHeight - Math.min(root.offsetHeight, window.innerHeight),
+        startTop + event.clientY - startY,
+      ));
+      root.style.left = `${Math.round(nextLeft)}px`;
+      root.style.top = `${Math.round(nextTop)}px`;
+      root.style.right = 'auto';
+      root.style.bottom = 'auto';
+    };
+  
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || pointerId !== null) return;
+      const bounds = root.getBoundingClientRect();
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      startLeft = bounds.left;
+      startTop = bounds.top;
+      root.style.position = 'fixed';
+      root.style.left = `${Math.round(startLeft)}px`;
+      root.style.top = `${Math.round(startTop)}px`;
+      root.style.right = 'auto';
+      root.style.bottom = 'auto';
+      root.classList.add('gp-window-dragging');
+      event.preventDefault();
+      document.addEventListener('pointermove', move, { capture: true, passive: false });
+      document.addEventListener('pointerup', stop, true);
+      document.addEventListener('pointercancel', stop, true);
+    });
   }
   
   function toggleFullscreen(root) {
@@ -1970,8 +2030,7 @@
     if (gallery.dataset.gpDirectSlideshowWired === '1') return;
     gallery.dataset.gpDirectSlideshowWired = '1';
   
-    gallery.addEventListener('click', (event) => {
-      if (event.defaultPrevented) return;
+    const openThumbnail = (event) => {
       if (event.button !== undefined && event.button !== 0) return;
       if (!(event.target instanceof Element)
         || event.target.closest('.gp-thumbnail-favorite')
@@ -1988,7 +2047,11 @@
       event.stopPropagation();
       event.stopImmediatePropagation();
       openDirectThumbnailSlideshow(root, source);
-    }, true);
+    };
+  
+    // Run on the gallery window, before NanoGallery's target-level lightbox
+    // listener. This prevents the native fullscreen viewer from flashing first.
+    root.addEventListener('click', openThumbnail, true);
   }
   
   function isVideoGallerySource(source) {
@@ -2003,6 +2066,7 @@
   function openDirectThumbnailSlideshow(root, source) {
     const viewer = document.createElement('div');
     viewer.className = 'draggable galleryImageDraggable';
+    viewer.id = `galleryplus-slideshow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     viewer.dataset.gpDirectSlideshow = '1';
     viewer._gpGalleryRoot = root;
     viewer.style.cssText = [
@@ -2019,10 +2083,21 @@
   
     const controlBar = document.createElement('div');
     controlBar.className = 'panelControlBar flex-container';
-    const closeButton = document.createElement('button');
-    closeButton.type = 'button';
-    closeButton.className = 'dragClose';
-    closeButton.textContent = 'Close';
+    const dragButton = document.createElement('div');
+    dragButton.className = 'fa-fw fa-solid fa-grip drag-grabber';
+    dragButton.title = 'Move slideshow window';
+    dragButton.setAttribute('aria-label', 'Move slideshow window');
+    dragButton.setAttribute('role', 'button');
+    dragButton.tabIndex = 0;
+    const closeButton = document.createElement('div');
+    closeButton.className = 'fa-fw fa-solid fa-circle-xmark dragClose';
+    closeButton.id = `${viewer.id}-close`;
+    closeButton.dataset.relatedId = viewer.id;
+    closeButton.title = 'Close slideshow';
+    closeButton.setAttribute('aria-label', 'Close slideshow');
+    closeButton.setAttribute('role', 'button');
+    closeButton.tabIndex = 0;
+    controlBar.appendChild(dragButton);
     controlBar.appendChild(closeButton);
   
     const media = document.createElement(isVideoGallerySource(source) ? 'video' : 'img');
@@ -2034,7 +2109,12 @@
     }
   
     viewer.append(title, controlBar, media);
-    closeButton.addEventListener('click', () => viewer.remove(), { once: true });
+    closeButton.addEventListener('click', () => viewer.remove());
+    closeButton.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      closeButton.click();
+    });
     (document.querySelector('#movingDivs') || document.body).appendChild(viewer);
   }
   
@@ -2742,14 +2822,22 @@
       renderSourceRows(entries);
       const enabledCount = entries.filter(entry => entry.enabled).length;
       status.textContent = folder
-        ? `${enabledCount} of ${entries.length} saved address${entries.length === 1 ? '' : 'es'} enabled.`
+        ? `${enabledCount} of ${entries.length} saved address${entries.length === 1 ? '' : 'es'} enabled. Discovering source subfolders…`
         : 'Choose a gallery folder first.';
       if (typeof dialog.showModal === 'function') dialog.showModal();
       else dialog.setAttribute('open', '');
       button.classList.add('active');
       button.setAttribute('aria-expanded', 'true');
       requestAnimationFrame(() => sourcesList.querySelector('.gp-external-source-address')?.focus());
-      void syncAutomaticSourceFolders(root);
+      void syncAutomaticSourceFolders(root).then((updatedEntries) => {
+        if (!dialog.open || dialog.dataset.gpDirty === '1') return;
+        const latest = Array.isArray(updatedEntries)
+          ? updatedEntries
+          : getExternalSourceEntries(folder);
+        renderSourceRows(latest);
+        const latestEnabled = latest.filter(entry => entry.enabled !== false).length;
+        status.textContent = `${latestEnabled} of ${latest.length} address${latest.length === 1 ? '' : 'es'} enabled.`;
+      });
     };
   
     button.addEventListener('click', openWindow);
@@ -3128,7 +3216,13 @@
           headers: getRequestHeaders(),
           body: JSON.stringify({ folder, sources: discoverableSources }),
         });
-        if (!response.ok) return getExternalSourceEntries(folder);
+        if (!response.ok) {
+          const current = getExternalSourceEntries(folder);
+          window.dispatchEvent(new CustomEvent(AUTOMATIC_SOURCES_EVENT, {
+            detail: { folder, entries: current, unavailable: true },
+          }));
+          return current;
+        }
         const payload = await response.json();
         const folders = Array.isArray(payload?.folders)
           ? payload.folders.filter(value => typeof value === 'string' && value.trim())
