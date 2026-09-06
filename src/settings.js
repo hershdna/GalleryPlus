@@ -1,6 +1,10 @@
 const EXT_ID = 'GalleryPlus';
 
 export const FAVORITES_CHANGED_EVENT = 'galleryplus:favorites-changed';
+export const RESUME_SESSION_CHANGED_EVENT = 'galleryplus:resume-session-changed';
+const RESUME_STORAGE_KEY = 'GalleryPlus.resumeSessions.v1';
+let resumeSessionMemory = {};
+let pendingResumeRequest = null;
 
 const DEFAULTS = {
   enabled: true,
@@ -8,6 +12,7 @@ const DEFAULTS = {
   openHeight: 800,
   hoverZoom: false,
   hoverZoomScale: 1.08,
+  zoomLock: false,
   viewerRect: null,
   masonryDense: false,
   showCaptions: true,
@@ -111,5 +116,65 @@ export function gpToggleFavorite(folder, source) {
     detail: { galleryKey, identity, favorite },
   }));
   return favorite;
+}
+
+function readResumeSessions() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RESUME_STORAGE_KEY) || '{}');
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      resumeSessionMemory = parsed;
+    }
+  } catch {
+    // Use the in-memory copy if storage is unavailable or corrupt.
+  }
+  return resumeSessionMemory;
+}
+
+function writeResumeSessions(sessions) {
+  resumeSessionMemory = sessions;
+  try {
+    localStorage.setItem(RESUME_STORAGE_KEY, JSON.stringify(sessions));
+  } catch (error) {
+    console.warn('[GalleryPlus] Could not persist the complete resume session', error);
+  }
+}
+
+export function gpGetResumeSession(folder = '') {
+  const session = readResumeSessions()[gpFavoriteGalleryKey(folder)];
+  return session && typeof session === 'object' ? session : null;
+}
+
+export function gpSaveResumeSession(folder, session) {
+  const galleryKey = gpFavoriteGalleryKey(folder);
+  const sessions = { ...readResumeSessions(), [galleryKey]: session };
+  writeResumeSessions(sessions);
+  document.dispatchEvent(new CustomEvent(RESUME_SESSION_CHANGED_EVENT, {
+    detail: { galleryKey, session },
+  }));
+}
+
+export function gpClearResumeSession(folder = '') {
+  const galleryKey = gpFavoriteGalleryKey(folder);
+  const sessions = { ...readResumeSessions() };
+  delete sessions[galleryKey];
+  writeResumeSessions(sessions);
+  document.dispatchEvent(new CustomEvent(RESUME_SESSION_CHANGED_EVENT, {
+    detail: { galleryKey, session: null },
+  }));
+}
+
+export function gpQueueResumeRequest(folder, autoPlay = false) {
+  pendingResumeRequest = {
+    galleryKey: gpFavoriteGalleryKey(folder),
+    autoPlay: Boolean(autoPlay),
+    expiresAt: Date.now() + 5000,
+  };
+}
+
+export function gpConsumeResumeRequest(folder) {
+  const request = pendingResumeRequest;
+  pendingResumeRequest = null;
+  if (!request || request.expiresAt < Date.now()) return null;
+  return request.galleryKey === gpFavoriteGalleryKey(folder) ? request : null;
 }
 
