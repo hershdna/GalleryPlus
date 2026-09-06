@@ -126,9 +126,7 @@ async function collectMediaFromDirectory(directory, files, limit) {
     if (files.length >= limit) break;
     if (entry.isSymbolicLink()) continue;
     const candidate = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      await collectMediaFromDirectory(candidate, files, limit);
-    } else if (entry.isFile() && isUsableMediaFile(candidate)) {
+    if (entry.isFile() && isUsableMediaFile(candidate)) {
       files.push(candidate);
     }
   }
@@ -181,18 +179,38 @@ async function collectExternalMedia(sources) {
   return { items, errors };
 }
 
-async function listGallerySourceFolders(imagesRoot, folder) {
+async function collectSubdirectories(directory, folders, seen, limit = 2000) {
+  if (folders.length >= limit) return;
+  const entries = await fs.promises.readdir(directory, { withFileTypes: true }).catch(() => []);
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    if (folders.length >= limit) break;
+    if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.toLowerCase() === 'deprecated') continue;
+    const child = path.resolve(directory, entry.name);
+    const key = process.platform === 'win32' ? child.toLowerCase() : child;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    folders.push(child);
+    await collectSubdirectories(child, folders, seen, limit);
+  }
+}
+
+async function listGallerySourceFolders(imagesRoot, folder, sources = []) {
   const sourceDirectory = resolveGalleryDirectory(imagesRoot, folder);
   if (!sourceDirectory) return null;
   const stat = await fs.promises.stat(sourceDirectory).catch(() => null);
   if (!stat?.isDirectory()) return null;
-  const entries = await fs.promises.readdir(sourceDirectory, { withFileTypes: true });
-  return entries
-    .filter(entry => entry.isDirectory()
-      && !entry.isSymbolicLink()
-      && entry.name.toLowerCase() !== 'deprecated')
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(entry => path.join(sourceDirectory, entry.name));
+  const folders = [];
+  const seen = new Set();
+  await collectSubdirectories(sourceDirectory, folders, seen);
+  for (const source of Array.isArray(sources) ? sources.slice(0, 100) : []) {
+    const resolved = normalizeSourceAddress(source);
+    if (!resolved) continue;
+    const sourceStat = await fs.promises.stat(resolved).catch(() => null);
+    if (!sourceStat?.isDirectory()) continue;
+    await collectSubdirectories(resolved, folders, seen);
+  }
+  return folders.sort((a, b) => a.localeCompare(b));
 }
 
 async function init(router) {
@@ -312,7 +330,11 @@ async function init(router) {
       if (!imagesRoot) {
         return response.status(500).send('The user images directory is unavailable.');
       }
-      const folders = await listGallerySourceFolders(imagesRoot, request.body?.folder);
+      const folders = await listGallerySourceFolders(
+        imagesRoot,
+        request.body?.folder,
+        request.body?.sources,
+      );
       if (!folders) return response.status(404).send('Gallery source folder not found.');
       return response.json({ folders });
     } catch (error) {
