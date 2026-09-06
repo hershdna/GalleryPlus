@@ -34,7 +34,7 @@ const plugin = require('./server-plugin');
   assert.equal(typeof legacyExternalFileHandler, 'function');
   const healthResult = { body: null };
   healthHandler({}, { json(bodyValue) { healthResult.body = bodyValue; } });
-  assert.equal(healthResult.body.version, '1.5.0');
+  assert.equal(healthResult.body.version, '1.5.1');
   assert.deepEqual(healthResult.body.capabilities, ['archive', 'open-folder', 'external-media', 'source-folders']);
 
   const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'galleryplus-'));
@@ -100,7 +100,7 @@ const plugin = require('./server-plugin');
       user: { directories: { userImages: imagesRoot } },
     }, sourceFolderResponse);
     assert.equal(sourceFolderResult.status, 200);
-    assert.deepEqual(sourceFolderResult.body.folders, [automaticFolder]);
+    assert.deepEqual(sourceFolderResult.body.folders, [automaticFolder, path.join(automaticFolder, 'Nested')]);
 
     fs.writeFileSync(path.join(sourceFolder, 'image.png'), 'first');
     const first = await invoke({ folder: 'Character', filename: 'image.png' });
@@ -139,10 +139,27 @@ const plugin = require('./server-plugin');
     assert.equal(externalResult.status, 200);
     assert.deepEqual(
       externalResult.body.items.map(item => item.name).sort(),
-      ['clip.webm', 'direct.mov', 'movie.mp4', 'photo.jpg'],
+      ['clip.webm', 'direct.mov', 'photo.jpg'],
     );
     assert.equal(externalResult.body.errors.length, 1);
     assert.equal(externalResult.body.errors[0].message, 'Path not found.');
+
+    await sourceFoldersHandler({
+      body: { folder: 'Character', sources: [externalFolder] },
+      user: { directories: { userImages: imagesRoot } },
+    }, sourceFolderResponse);
+    assert.equal(sourceFolderResult.status, 200);
+    assert.deepEqual(
+      sourceFolderResult.body.folders,
+      [automaticFolder, path.join(automaticFolder, 'Nested'), nestedFolder]
+        .sort((a, b) => a.localeCompare(b)),
+    );
+
+    await externalListHandler({
+      body: { sources: [nestedFolder] },
+    }, externalResponse);
+    assert.equal(externalResult.status, 200);
+    assert.deepEqual(externalResult.body.items.map(item => item.name), ['movie.mp4']);
 
     const mediaItem = externalResult.body.items.find(item => item.name === 'movie.mp4');
     assert.match(mediaItem.url, /\/external-media\/file\/[a-f0-9]{64}\.mp4$/);
