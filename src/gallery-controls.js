@@ -1,4 +1,4 @@
-import { FAVORITES_CHANGED_EVENT, gpFavoriteGalleryKey, gpFavoriteIdentity, gpGetFavoriteSet, gpSettings, gpSaveSettings, gpToggleFavorite } from './settings.js';
+import { FAVORITES_CHANGED_EVENT, gpClearResumeSession, gpFavoriteGalleryKey, gpFavoriteIdentity, gpGetFavoriteSet, gpGetResumeSession, gpQueueResumeRequest, gpSettings, gpSaveSettings, gpToggleFavorite, RESUME_SESSION_CHANGED_EVENT } from './settings.js';
 
 const CUSTOM_SORT = 'custom';
 const ARCHIVE_ENDPOINT = '/api/plugins/galleryplus/archive';
@@ -131,6 +131,7 @@ export function wireGallery(root) {
   installOpenFolderControl(root);
   installExternalSourcesControl(root);
   installFileTypeFilterControl(root, sortSelect);
+  installResumeSlideshowControl(root, gallery);
   installGalleryFavorites(root, gallery);
   installArchiveControl(root, gallery, sortSelect);
   installReordering(root, gallery, sortSelect);
@@ -475,6 +476,96 @@ function installOpenFolderControl(root) {
   const folderAccept = topBar.querySelector('.fa-check');
   if (folderAccept) folderAccept.insertAdjacentElement('afterend', button);
   else topBar.appendChild(button);
+}
+
+function installResumeSlideshowControl(root, gallery) {
+  const folderInput = root.querySelector('.gallery-folder-input');
+  const topBar = folderInput?.parentElement;
+  if (!(topBar instanceof HTMLElement) || topBar.querySelector('.gp-resume-wrap')) return;
+
+  const wrap = document.createElement('span');
+  wrap.className = 'gp-resume-wrap';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'menu_button gp-resume-slideshow';
+
+  const options = document.createElement('select');
+  options.className = 'gp-resume-options';
+  options.title = 'Resume slideshow options';
+  options.setAttribute('aria-label', options.title);
+  [
+    ['', '▾'],
+    ['play', 'Resume and play'],
+    ['clear', 'Clear saved position'],
+  ].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    options.appendChild(option);
+  });
+
+  const getFolder = () => getGalleryFolder(root);
+  const update = () => {
+    const session = gpGetResumeSession(getFolder());
+    const position = Math.max(1, Number(session?.position) || 1);
+    const count = Math.max(position, Number(session?.count) || 0);
+    button.disabled = !session;
+    options.disabled = !session;
+    button.textContent = session ? `↻ ${position}/${count}` : '↻ Resume';
+    button.title = session
+      ? `Resume slideshow at ${position} of ${count} (paused)`
+      : 'No saved slideshow position for this gallery';
+    button.setAttribute('aria-label', button.title);
+  };
+
+  const resume = (autoPlay) => {
+    const folder = getFolder();
+    if (!gpGetResumeSession(folder)) return;
+    const thumbnail = gallery.querySelector('.nGY2GThumbnail');
+    if (!(thumbnail instanceof HTMLElement)) {
+      notify('info', 'The gallery needs at least one visible thumbnail before it can resume.');
+      return;
+    }
+    gpQueueResumeRequest(folder, autoPlay);
+    const target = thumbnail.querySelector('img, video, .nGY2GThumbnailImage') || thumbnail;
+    target.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+    }));
+  };
+
+  button.addEventListener('click', () => resume(false));
+  options.addEventListener('change', () => {
+    const action = options.value;
+    options.value = '';
+    if (action === 'play') resume(true);
+    else if (action === 'clear') {
+      gpClearResumeSession(getFolder());
+      notify('success', 'Saved slideshow position cleared.');
+    }
+  });
+  const onResumeChanged = (event) => {
+    if (event.detail?.galleryKey === gpFavoriteGalleryKey(getFolder())) update();
+  };
+  document.addEventListener(RESUME_SESSION_CHANGED_EVENT, onResumeChanged);
+
+  wrap.append(button, options);
+  const fileTypes = topBar.querySelector('.gp-file-types-button');
+  const externalSources = topBar.querySelector('.gp-external-sources-button');
+  const openFolder = topBar.querySelector('.gp-open-folder');
+  const anchor = fileTypes || externalSources || openFolder;
+  if (anchor) anchor.insertAdjacentElement('afterend', wrap);
+  else topBar.appendChild(wrap);
+  update();
+
+  const lifecycleObserver = new MutationObserver(() => {
+    if (document.body.contains(root)) return;
+    document.removeEventListener(RESUME_SESSION_CHANGED_EVENT, onResumeChanged);
+    lifecycleObserver.disconnect();
+  });
+  lifecycleObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function installExternalSourcesControl(root) {
