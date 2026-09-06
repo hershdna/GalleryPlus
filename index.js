@@ -1943,6 +1943,7 @@
     installResumeSlideshowControl(root, gallery);
     installGalleryFavorites(root, gallery);
     installArchiveControl(root, gallery, sortSelect);
+    installDirectThumbnailSlideshow(root, gallery);
     installReordering(root, gallery, sortSelect);
     disableGalleryPageSwipe(root, gallery);
     installPaginationScrubbing(root, gallery);
@@ -1959,6 +1960,77 @@
     void syncAutomaticSourceFolders(root);
   
     sortSelect.addEventListener('change', () => updateCustomOrderHint(root, sortSelect));
+  }
+  
+  function installDirectThumbnailSlideshow(root, gallery) {
+    if (gallery.dataset.gpDirectSlideshowWired === '1') return;
+    gallery.dataset.gpDirectSlideshowWired = '1';
+  
+    gallery.addEventListener('click', (event) => {
+      if (event.defaultPrevented) return;
+      if (event.button !== undefined && event.button !== 0) return;
+      if (!(event.target instanceof Element)
+        || event.target.closest('.gp-thumbnail-favorite')
+        || event.target.closest(PAGINATION_ICON_SELECTOR)) return;
+  
+      const thumbnail = event.target.closest('.nGY2GThumbnail');
+      if (!(thumbnail instanceof HTMLElement) || !gallery.contains(thumbnail)) return;
+      if (document.querySelector('.galleryImageDraggable')) return;
+  
+      const source = getThumbnailFavoriteSource(root, thumbnail);
+      if (!source || source.startsWith('data:')) return;
+  
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      openDirectThumbnailSlideshow(root, source);
+    }, true);
+  }
+  
+  function isVideoGallerySource(source) {
+    try {
+      const pathname = new URL(String(source), location.href).pathname;
+      return ['mov', 'mp4', 'webm'].includes(pathname.split('.').pop()?.toLowerCase());
+    } catch {
+      return /\.(?:mov|mp4|webm)(?:$|[?#])/i.test(String(source));
+    }
+  }
+  
+  function openDirectThumbnailSlideshow(root, source) {
+    const viewer = document.createElement('div');
+    viewer.className = 'draggable galleryImageDraggable';
+    viewer.dataset.gpDirectSlideshow = '1';
+    viewer.style.cssText = [
+      'position:fixed',
+      'top:8vh',
+      'left:8vw',
+      'width:84vw',
+      'height:84vh',
+    ].join(';');
+  
+    const title = document.createElement('div');
+    title.className = 'dragTitle';
+    title.textContent = 'GalleryPlus Slideshow';
+  
+    const controlBar = document.createElement('div');
+    controlBar.className = 'panelControlBar flex-container';
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'dragClose';
+    closeButton.textContent = 'Close';
+    controlBar.appendChild(closeButton);
+  
+    const media = document.createElement(isVideoGallerySource(source) ? 'video' : 'img');
+    media.src = source;
+    media.alt = 'Gallery image';
+    if (media instanceof HTMLVideoElement) {
+      media.playsInline = true;
+      media.preload = 'auto';
+    }
+  
+    viewer.append(title, controlBar, media);
+    closeButton.addEventListener('click', () => viewer.remove(), { once: true });
+    (document.querySelector('#movingDivs') || document.body).appendChild(viewer);
   }
   
   function getThumbnailFavoriteSource(root, thumbnail) {
