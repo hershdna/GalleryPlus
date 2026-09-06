@@ -135,6 +135,7 @@ export function wireGallery(root) {
   installGalleryFavorites(root, gallery);
   installArchiveControl(root, gallery, sortSelect);
   installDirectThumbnailSlideshow(root, gallery);
+  installGalleryFolderChangeHandling(root);
   installReordering(root, gallery, sortSelect);
   disableGalleryPageSwipe(root, gallery);
   installPaginationScrubbing(root, gallery);
@@ -191,6 +192,7 @@ function openDirectThumbnailSlideshow(root, source) {
   const viewer = document.createElement('div');
   viewer.className = 'draggable galleryImageDraggable';
   viewer.dataset.gpDirectSlideshow = '1';
+  viewer._gpGalleryRoot = root;
   viewer.style.cssText = [
     'position:fixed',
     'top:8vh',
@@ -222,6 +224,76 @@ function openDirectThumbnailSlideshow(root, source) {
   viewer.append(title, controlBar, media);
   closeButton.addEventListener('click', () => viewer.remove(), { once: true });
   (document.querySelector('#movingDivs') || document.body).appendChild(viewer);
+}
+
+function installGalleryFolderChangeHandling(root) {
+  if (root.dataset.gpFolderChangeWired === '1') return;
+  const folderInput = root.querySelector('.gallery-folder-input');
+  const topBar = folderInput?.parentElement;
+  if (!(folderInput instanceof HTMLInputElement) || !(topBar instanceof HTMLElement)) return;
+
+  root.dataset.gpFolderChangeWired = '1';
+  let previousFolder = getGalleryFolder(root);
+  root._gpGalleryFolder = previousFolder;
+
+  const schedule = () => {
+    clearTimeout(root._gpFolderChangeTimer);
+    root._gpFolderChangeTimer = setTimeout(() => {
+      const folder = getGalleryFolder(root);
+      if (folder === previousFolder) return;
+      const oldFolder = previousFolder;
+      previousFolder = folder;
+      root._gpGalleryFolder = folder;
+      root._gpGalleryBaseUrl = '';
+      root._gpSourceGalleryList = [];
+      root._gpCanonicalGalleryList = [];
+      root._gpGalleryList = [];
+      root.dataset.gpRandomized = '0';
+
+      clearTimeout(root._gpListTimer);
+      root._gpListTimer = null;
+      document.querySelectorAll('.galleryImageDraggable').forEach((viewer) => {
+        if (viewer._gpGalleryRoot !== root) return;
+        viewer.querySelector('.dragClose')?.click();
+        if (viewer.isConnected) viewer.remove();
+      });
+
+      document.querySelectorAll('.gp-external-sources-window[open], .gp-file-types-window[open]')
+        .forEach((dialog) => {
+          if (typeof dialog.close === 'function') dialog.close();
+          else dialog.removeAttribute('open');
+        });
+
+      const refreshState = () => {
+        if (!root.isConnected || getGalleryFolder(root) !== folder) return;
+        root._gpGalleryFolder = folder;
+        void syncAutomaticSourceFolders(root);
+      };
+      requestAnimationFrame(refreshState);
+      setTimeout(refreshState, 180);
+      setTimeout(refreshState, 800);
+      window.dispatchEvent(new CustomEvent('galleryplus:gallery-folder-changed', {
+        detail: { root, oldFolder, folder },
+      }));
+    }, 0);
+  };
+
+  folderInput.addEventListener('change', schedule);
+  folderInput.addEventListener('blur', schedule);
+  topBar.addEventListener('click', (event) => {
+    if (event.target instanceof Element && event.target.closest('.fa-check')) schedule();
+  }, true);
+  const folderPollTimer = setInterval(() => {
+    if (getGalleryFolder(root) !== previousFolder) schedule();
+  }, 250);
+
+  const lifecycleObserver = new MutationObserver(() => {
+    if (document.body.contains(root)) return;
+    clearTimeout(root._gpFolderChangeTimer);
+    clearInterval(folderPollTimer);
+    lifecycleObserver.disconnect();
+  });
+  lifecycleObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function getThumbnailFavoriteSource(root, thumbnail) {
@@ -705,7 +777,7 @@ function installExternalSourcesControl(root) {
 
   const help = document.createElement('small');
   help.className = 'gp-external-sources-help';
-  help.textContent = 'Source subfolders are linked automatically (except deprecated). Adding the same address manually overrides its Auto link. Uncheck any address to keep it saved but omit its files. Folders include supported images and videos in all subfolders.';
+  help.textContent = 'Source subfolders are listed automatically (except deprecated) as selectable Auto links. Adding the same address manually overrides its Auto link. Uncheck any address to keep it saved but omit its files. Each selected folder contributes files directly inside it.';
   panel.appendChild(help);
 
   const status = document.createElement('div');
@@ -1236,10 +1308,13 @@ async function syncAutomaticSourceFolders(root) {
 
   const load = (async () => {
     try {
+      const discoverableSources = getExternalSourceEntries(folder)
+        .filter(entry => entry.enabled !== false)
+        .map(entry => entry.address);
       const response = await window.fetch(SOURCE_FOLDERS_ENDPOINT, {
         method: 'POST',
         headers: getRequestHeaders(),
-        body: JSON.stringify({ folder }),
+        body: JSON.stringify({ folder, sources: discoverableSources }),
       });
       if (!response.ok) return getExternalSourceEntries(folder);
       const payload = await response.json();
