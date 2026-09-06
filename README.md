@@ -29,6 +29,7 @@ custom image ordering, and safe gallery organization.
 - Automatic omission of missing, unreadable, corrupt, unsupported, and durationless external media
 - Per-gallery file-type filters shared by the thumbnail view and slideshow
 - Scroll-wheel or hover zoom, click-and-drag panning, and an optional Zoom Lock that carries zoom and pan across slides
+- Thumbnail clicks open the GalleryPlus slideshow directly, without the native fullscreen lightbox or filename captions
 
 Short videos repeat until the configured minimum video play time is reached.
 GalleryPlus advances only after the current repetition finishes; videos longer
