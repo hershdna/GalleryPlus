@@ -34,7 +34,7 @@ const plugin = require('./server-plugin');
   assert.equal(typeof legacyExternalFileHandler, 'function');
   const healthResult = { body: null };
   healthHandler({}, { json(bodyValue) { healthResult.body = bodyValue; } });
-  assert.equal(healthResult.body.version, '1.5.1');
+  assert.equal(healthResult.body.version, '1.5.2');
   assert.deepEqual(healthResult.body.capabilities, ['archive', 'open-folder', 'external-media', 'source-folders']);
 
   const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'galleryplus-'));
@@ -100,7 +100,7 @@ const plugin = require('./server-plugin');
       user: { directories: { userImages: imagesRoot } },
     }, sourceFolderResponse);
     assert.equal(sourceFolderResult.status, 200);
-    assert.deepEqual(sourceFolderResult.body.folders, [automaticFolder, path.join(automaticFolder, 'Nested')]);
+    assert.deepEqual(sourceFolderResult.body.folders, [automaticFolder]);
 
     fs.writeFileSync(path.join(sourceFolder, 'image.png'), 'first');
     const first = await invoke({ folder: 'Character', filename: 'image.png' });
@@ -151,9 +151,19 @@ const plugin = require('./server-plugin');
     assert.equal(sourceFolderResult.status, 200);
     assert.deepEqual(
       sourceFolderResult.body.folders,
-      [automaticFolder, path.join(automaticFolder, 'Nested'), nestedFolder]
+      [automaticFolder, nestedFolder]
         .sort((a, b) => a.localeCompare(b)),
     );
+
+    await sourceFoldersHandler({
+      body: { folder: 'Character', sources: [automaticFolder] },
+      user: { directories: { userImages: imagesRoot } },
+    }, sourceFolderResponse);
+    assert.equal(sourceFolderResult.status, 200);
+    assert.deepEqual(sourceFolderResult.body.folders, [
+      automaticFolder,
+      path.join(automaticFolder, 'Nested'),
+    ]);
 
     await externalListHandler({
       body: { sources: [nestedFolder] },
