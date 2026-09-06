@@ -3210,8 +3210,10 @@
   
     const load = (async () => {
       try {
+        // Discovery must include disabled links too. A user may disable a parent
+        // folder specifically to choose one of its Auto-linked child folders.
+        // Disabled entries are still excluded from the media request below.
         const discoverableSources = getExternalSourceEntries(folder)
-          .filter(entry => entry.enabled !== false)
           .map(entry => entry.address);
         const response = await window.fetch(SOURCE_FOLDERS_ENDPOINT, {
           method: 'POST',
