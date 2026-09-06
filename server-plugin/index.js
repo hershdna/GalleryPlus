@@ -191,7 +191,6 @@ async function collectSubdirectories(directory, folders, seen, limit = 2000) {
     if (seen.has(key)) continue;
     seen.add(key);
     folders.push(child);
-    await collectSubdirectories(child, folders, seen, limit);
   }
 }
 
