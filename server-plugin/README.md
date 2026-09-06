@@ -20,6 +20,8 @@ The UI uses `/api/plugins/galleryplus/archive` when Remove mode is active and
 Both routes restrict requests to a single gallery folder beneath the current
 user's images directory. The source-folder route returns immediate child folders
 except `deprecated`; the external-media routes accept saved file/folder
-addresses, recursively list recognized image/video types, and serve only files
-registered by that listing request through unguessable `token.extension` URLs.
+addresses, list recognized image/video types directly inside each selected
+folder, discover nested subfolders as selectable automatic links, and serve
+only files registered by that listing request through unguessable
+`token.extension` URLs.
 
