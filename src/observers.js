@@ -82,23 +82,47 @@ function openGalleryFromTopbar() {
 }
 
 function installTopbarGalleryButton() {
-  const topBar = document.querySelector('#top-bar');
-  if (!(topBar instanceof HTMLElement) || topBar.querySelector(`#${TOPBAR_BUTTON_ID}`)) return;
+  // ST's main icon row is #top-settings-holder. Use the same drawer structure
+  // as native icons and as Character Library so extensions can coexist in the
+  // same flex row without introducing a differently sized/block-level button.
+  const host = document.querySelector('#top-settings-holder') || document.querySelector('#top-bar');
+  if (!(host instanceof HTMLElement)) return;
 
-  const button = document.createElement('div');
-  button.id = TOPBAR_BUTTON_ID;
-  button.className = 'fa-solid fa-images interactable gp-topbar-gallery-button';
-  button.title = 'Open GalleryPlus gallery';
-  button.setAttribute('aria-label', button.title);
-  button.setAttribute('role', 'button');
-  button.setAttribute('tabindex', '0');
-  button.addEventListener('click', openGalleryFromTopbar);
-  button.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    openGalleryFromTopbar();
-  });
-  topBar.appendChild(button);
+  let button = document.getElementById(TOPBAR_BUTTON_ID);
+  if (!(button instanceof HTMLElement)) {
+    button = document.createElement('div');
+    button.id = TOPBAR_BUTTON_ID;
+    button.title = 'Open GalleryPlus gallery';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('role', 'button');
+    button.setAttribute('tabindex', '0');
+    button.addEventListener('click', openGalleryFromTopbar);
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openGalleryFromTopbar();
+    });
+  }
+
+  button.className = 'drawer gp-topbar-gallery-button';
+  if (!button.querySelector('.gp-topbar-gallery-icon')) {
+    button.replaceChildren();
+    const toggle = document.createElement('div');
+    toggle.className = 'drawer-toggle drawer-header';
+    const icon = document.createElement('div');
+    icon.className = 'drawer-icon fa-solid fa-image fa-fw closedIcon gp-topbar-gallery-icon';
+    icon.title = button.title;
+    icon.setAttribute('aria-hidden', 'true');
+    toggle.appendChild(icon);
+    button.appendChild(toggle);
+  }
+
+  // appendChild moves only our node, keeping other extensions' icons intact,
+  // while guaranteeing GalleryPlus remains the right-most icon after a late
+  // Character Library/extension insertion.
+  if (button.parentElement !== host || host.lastElementChild !== button) {
+    host.appendChild(button);
+  }
 }
 
 export function initObservers() {
