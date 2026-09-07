@@ -257,9 +257,28 @@
   box-shadow: 0 0 0 2px var(--SmartThemeUnderlineColor, #7aa2f7) inset;
 }
 .gp-topbar-gallery-button {
-  order: 5;
-  padding: 1px;
+  align-items: center;
+  justify-content: center;
+  display: flex;
+  flex-flow: row;
+  width: 100%;
+}
+
+.gp-topbar-gallery-button .gp-topbar-gallery-icon {
+  display: inline-block;
   cursor: pointer;
+  font-size: var(--topBarIconSize, calc(var(--mainFontSize, 16px) * 2));
+  padding: 1px 3px;
+}
+
+.gp-topbar-gallery-button .gp-topbar-gallery-icon.closedIcon {
+  opacity: 0.3;
+  transition: all var(--animation-duration-2x, 250ms);
+}
+
+.gp-topbar-gallery-button .gp-topbar-gallery-icon.closedIcon:hover,
+.gp-topbar-gallery-button .gp-topbar-gallery-icon.closedIcon:focus-visible {
+  opacity: 1;
 }
 .gp-file-types-panel {
   padding: 14px;
