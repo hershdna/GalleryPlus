@@ -4078,6 +4078,7 @@
   }
 
   const PERFORMANCE_NOTICE = 'Open the full gallery in Character Library for better performance';
+  const TOPBAR_BUTTON_ID = 'galleryplus-topbar-button';
   let performanceNoticeShown = false;
   
   function isPerformanceNotice(value) {
@@ -4134,10 +4135,53 @@
     }
   }
   
+  function openGalleryFromTopbar() {
+    // The core Gallery extension owns the actual gallery-opening routine. Use
+    // its existing action so the toolbar button stays compatible with ST.
+    const galleryAction = document.querySelector('#show_gallery_wand_button');
+    if (galleryAction instanceof HTMLElement) {
+      galleryAction.click();
+      return;
+    }
+  
+    // Older ST builds expose the same action through the character-management
+    // dropdown instead of the extensions menu.
+    const management = document.querySelector('#char-management-dropdown');
+    const galleryOption = management?.querySelector('#show_char_gallery');
+    if (!(management instanceof HTMLSelectElement) || !galleryOption) return;
+    const previous = management.value;
+    management.value = 'show_char_gallery';
+    management.dispatchEvent(new Event('change', { bubbles: true }));
+    if (previous && previous !== 'show_char_gallery') {
+      setTimeout(() => { management.value = previous; }, 0);
+    }
+  }
+  
+  function installTopbarGalleryButton() {
+    const topBar = document.querySelector('#top-bar');
+    if (!(topBar instanceof HTMLElement) || topBar.querySelector(`#${TOPBAR_BUTTON_ID}`)) return;
+  
+    const button = document.createElement('div');
+    button.id = TOPBAR_BUTTON_ID;
+    button.className = 'fa-solid fa-images interactable gp-topbar-gallery-button';
+    button.title = 'Open GalleryPlus gallery';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('role', 'button');
+    button.setAttribute('tabindex', '0');
+    button.addEventListener('click', openGalleryFromTopbar);
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openGalleryFromTopbar();
+    });
+    topBar.appendChild(button);
+  }
+  
   function initObservers() {
     installPerformanceNoticeDeduper();
     observePerformanceNoticeDuplicates();
     installCustomOrderFetchHook();
+    installTopbarGalleryButton();
   
     const galleryObserver = new MutationObserver((mutations) => {
       applyGalleryTitle();
@@ -4150,6 +4194,8 @@
       }
     });
     galleryObserver.observe(document.body, { childList: true, subtree: true });
+    const topbarObserver = new MutationObserver(installTopbarGalleryButton);
+    topbarObserver.observe(document.body, { childList: true, subtree: true });
     applyGalleryTitle();
     document.querySelectorAll('#gallery').forEach(wireGallery);
   
