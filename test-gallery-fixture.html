@@ -17,6 +17,9 @@
   </style>
 </head>
 <body>
+  <div id="top-bar">
+    <div id="show_gallery_wand_button" style="display:none"></div>
+  </div>
   <div id="gallery">
     <div class="dragTitle">
       <span>Image Gallery</span>
@@ -29,6 +32,7 @@
     </div>
     <div class="flex-container">
       <input class="gallery-folder-input" value="Character">
+      <div class="right_menu_button fa-solid fa-check fa-fw" title="Change gallery folder"></div>
       <div class="right_menu_button fa-solid fa-trash fa-fw" title="Delete mode"></div>
     </div>
     <div id="dragGallery">
@@ -57,15 +61,17 @@
       gallery: { sort: 'dateAsc', folders: {} },
       GalleryPlus: {
         customOrders: {},
-        externalSources: fixtureOptions.has('linked') ? { Character: ['E:\\Large Gallery'] } : {},
+        externalSources: fixtureOptions.has('linkedDisabled')
+          ? { Character: [{ address: 'E:\\Large Gallery', enabled: false }] }
+          : (fixtureOptions.has('linked') ? { Character: ['E:\\Large Gallery'] } : {}),
         fileTypeFilters: {},
       },
     };
     const files = ['one.svg', 'two.svg', 'three.svg', 'wide.svg', 'clip.webm', 'movie.mp4'];
     const items = files.map(file => ({
       src: file.endsWith('.svg')
-        ? `http://127.0.0.1:41789/images/${file}`
-        : `http://127.0.0.1:41789/user/images/Character/${file}`,
+        ? `${location.origin}/images/${file}`
+        : `${location.origin}/user/images/Character/${file}`,
       responsiveURL() { return this.src; },
     }));
     window.SillyTavern = {
@@ -199,7 +205,9 @@
       if (path === '/api/plugins/galleryplus/source-folders/list') {
         document.body.dataset.sourceFoldersRequest = init.body;
         return new Response(JSON.stringify({
-          folders: ['C:\\Gallery\\Character\\Sets', 'C:\\Gallery\\Character\\Extras'],
+          folders: fixtureOptions.has('noAuto')
+            ? []
+            : ['C:\\Gallery\\Character\\Sets', 'C:\\Gallery\\Character\\Extras'],
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -235,7 +243,7 @@
       if (path === '/api/images/list') {
         document.body.dataset.imagesListRequest = init.body;
         document.body.dataset.imagesListRespondedAt = String(performance.now());
-        return new Response(JSON.stringify(files), {
+        return new Response(JSON.stringify(items.map(item => item.src)), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -253,6 +261,12 @@
       document.body.dataset.refreshCount = String(Number(document.body.dataset.refreshCount || 0) + 1);
       document.body.dataset.settings = JSON.stringify(settings);
     });
+    document.querySelector('.gallery-folder-input').addEventListener('change', (event) => {
+      document.body.dataset.folderChanged = event.target.value;
+    });
+    document.getElementById('show_gallery_wand_button').addEventListener('click', () => {
+      document.body.dataset.topbarGalleryOpened = '1';
+    });
   </script>
   <script src="/index.js"></script>
   <script>
@@ -268,6 +282,7 @@
         '<div class="panelControlBar"><button class="dragClose">Close</button></div>',
         `<img src="${thumbnail.querySelector('img').src}" alt="Current slide">`,
       ].join('');
+      viewer.querySelector('.dragClose').addEventListener('click', () => viewer.remove());
       document.getElementById('movingDivs').appendChild(viewer);
       document.body.dataset.thumbnailOpenedSlideshow = '1';
     });
