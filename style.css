@@ -256,6 +256,11 @@
 .gp-file-types-button.active {
   box-shadow: 0 0 0 2px var(--SmartThemeUnderlineColor, #7aa2f7) inset;
 }
+.gp-topbar-gallery-button {
+  order: 5;
+  padding: 1px;
+  cursor: pointer;
+}
 .gp-file-types-panel {
   padding: 14px;
 }
