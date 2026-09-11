@@ -26,6 +26,7 @@ const DEFAULTS = {
   presentationMode: 'all',
   favoritesByGallery: {},
   externalSources: {},
+  groupGalleryFolders: {},
   fileTypeFilters: {},
   customOrders: {},
 };
@@ -74,6 +75,31 @@ export function gpSaveSettings(partial = {}) {
     const merged = { ..._settingsBag(), ...partial };
     localStorage.setItem('GP_SETTINGS', JSON.stringify(merged));
   }
+}
+
+export function gpGetGroupGalleryFolder(groupId = '') {
+  const key = String(groupId || '').trim();
+  if (!key) return '';
+  const stored = gpSettings().groupGalleryFolders;
+  const folder = stored && typeof stored === 'object' ? stored[key] : '';
+  return typeof folder === 'string' ? folder.trim() : '';
+}
+
+export function gpSetGroupGalleryFolder(groupId, folder = '') {
+  const key = String(groupId || '').trim();
+  if (!key) return;
+
+  const stored = gpSettings().groupGalleryFolders;
+  const groupGalleryFolders = stored && typeof stored === 'object' ? { ...stored } : {};
+  const value = String(folder || '').trim();
+  if (value) groupGalleryFolders[key] = value;
+  else delete groupGalleryFolders[key];
+
+  gpSaveSettings({ groupGalleryFolders });
+}
+
+export function gpClearGroupGalleryFolder(groupId) {
+  gpSetGroupGalleryFolder(groupId, '');
 }
 
 export function gpFavoriteGalleryKey(folder = '') {
@@ -177,4 +203,3 @@ export function gpConsumeResumeRequest(folder) {
   if (!request || request.expiresAt < Date.now()) return null;
   return request.galleryKey === gpFavoriteGalleryKey(folder) ? request : null;
 }
-
