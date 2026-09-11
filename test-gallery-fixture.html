@@ -58,16 +58,21 @@
   </div>
   <div id="movingDivs"></div>
   <button id="fetch-order">Fetch custom order</button>
+  <button id="test-group-folder">Test group folder change</button>
   <button id="test-cross-page-reorder">Test cross-page reorder</button>
   <button id="show-performance-notices">Show performance notices</button>
   <output id="fetch-result"></output>
   <script>
     const fixtureOptions = new URLSearchParams(location.search);
+    const fixtureGroupId = fixtureOptions.get('group') || '';
     if (fixtureOptions.has('small')) document.body.classList.add('gp-small-gallery');
     const settings = {
       gallery: { sort: 'dateAsc', folders: {} },
       GalleryPlus: {
         customOrders: {},
+        groupGalleryFolders: fixtureOptions.has('groupOverride')
+          ? { [fixtureGroupId || 'Group Chat']: 'Group Media' }
+          : {},
         externalSources: fixtureOptions.has('linkedDisabled')
           ? { Character: [{ address: 'E:\\Large Gallery', enabled: false }] }
           : (fixtureOptions.has('linked') ? { Character: ['E:\\Large Gallery'] } : {}),
@@ -85,6 +90,7 @@
       getContext() {
         return {
           extensionSettings: settings,
+          groupId: fixtureGroupId || undefined,
           getRequestHeaders() { return { 'Content-Type': 'application/json' }; },
           saveSettingsDebounced() {
             document.body.dataset.settings = JSON.stringify(settings);
@@ -92,6 +98,7 @@
         };
       },
     };
+    if (fixtureGroupId) document.querySelector('.gallery-folder-input').value = fixtureGroupId;
     const galleryInstance = { fixture: true };
     const galleryPluginData = {
       options: { paginationSwipe: true, galleryNavigationOverlayButtons: true },
@@ -273,6 +280,7 @@
     });
     document.getElementById('show_gallery_wand_button').addEventListener('click', () => {
       document.body.dataset.topbarGalleryOpened = '1';
+      document.body.dataset.topbarGalleryOpenCount = String(Number(document.body.dataset.topbarGalleryOpenCount || 0) + 1);
     });
   </script>
   <script src="/index.js"></script>
@@ -297,9 +305,15 @@
       const response = await fetch('/api/images/list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder: 'Character', sortField: 'date', sortOrder: 'asc' }),
+        body: JSON.stringify({ folder: fixtureGroupId || 'Character', sortField: 'date', sortOrder: 'asc' }),
       });
       document.getElementById('fetch-result').textContent = JSON.stringify(await response.json());
+    });
+    document.getElementById('test-group-folder').addEventListener('click', () => {
+      if (!fixtureGroupId) return;
+      const input = document.querySelector('.gallery-folder-input');
+      input.value = 'Group Media';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
     });
     document.getElementById('test-cross-page-reorder').addEventListener('click', async () => {
       const source = document.querySelector('.nGY2GThumbnail[title="one.svg"]');
@@ -336,4 +350,3 @@
   </script>
 </body>
 </html>
-
