@@ -227,6 +227,11 @@
 #gallery[data-gp-gallery-wired="1"] {
   display: flex !important;
   flex-direction: column;
+  /* SillyTavern's shared .draggable rule caps windows at 90vw/90vh.
+     The gallery is user-resizable and should be able to reach the viewport
+     edges; dragElement still clamps it to the available browser area. */
+  max-width: none !important;
+  max-height: none !important;
 }
 #gallery[data-gp-gallery-wired="1"] > .dragTitle,
 #gallery[data-gp-gallery-wired="1"] > .flex-container {
@@ -626,4 +631,3 @@
   left: auto;
   z-index: 2;
 }
-
