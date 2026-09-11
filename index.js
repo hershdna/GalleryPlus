@@ -29,6 +29,7 @@
     presentationMode: 'all',
     favoritesByGallery: {},
     externalSources: {},
+    groupGalleryFolders: {},
     fileTypeFilters: {},
     customOrders: {},
   };
@@ -77,6 +78,31 @@
       const merged = { ..._settingsBag(), ...partial };
       localStorage.setItem('GP_SETTINGS', JSON.stringify(merged));
     }
+  }
+  
+  function gpGetGroupGalleryFolder(groupId = '') {
+    const key = String(groupId || '').trim();
+    if (!key) return '';
+    const stored = gpSettings().groupGalleryFolders;
+    const folder = stored && typeof stored === 'object' ? stored[key] : '';
+    return typeof folder === 'string' ? folder.trim() : '';
+  }
+  
+  function gpSetGroupGalleryFolder(groupId, folder = '') {
+    const key = String(groupId || '').trim();
+    if (!key) return;
+  
+    const stored = gpSettings().groupGalleryFolders;
+    const groupGalleryFolders = stored && typeof stored === 'object' ? { ...stored } : {};
+    const value = String(folder || '').trim();
+    if (value) groupGalleryFolders[key] = value;
+    else delete groupGalleryFolders[key];
+  
+    gpSaveSettings({ groupGalleryFolders });
+  }
+  
+  function gpClearGroupGalleryFolder(groupId) {
+    gpSetGroupGalleryFolder(groupId, '');
   }
   
   function gpFavoriteGalleryKey(folder = '') {
@@ -1928,6 +1954,11 @@
         pathname = new URL(url, location.href).pathname;
         if (pathname === '/api/images/list' && typeof init?.body === 'string') {
           requestBody = JSON.parse(init.body);
+          const groupId = getActiveGroupId();
+          const groupFolder = groupId ? gpGetGroupGalleryFolder(groupId) : '';
+          if (groupFolder && String(requestBody.folder || '') === groupId) {
+            requestBody = { ...requestBody, folder: groupFolder };
+          }
           effectiveInit = {
             ...init,
             body: JSON.stringify({ ...requestBody, type: 0b011 }),
@@ -2125,6 +2156,12 @@
     if (!(folderInput instanceof HTMLInputElement) || !(topBar instanceof HTMLElement)) return;
   
     root.dataset.gpFolderChangeWired = '1';
+    const groupId = getActiveGroupId();
+    const defaultGroupFolder = groupId || String(folderInput.value || '').trim();
+    const savedGroupFolder = groupId ? gpGetGroupGalleryFolder(groupId) : '';
+    if (savedGroupFolder && folderInput.value !== savedGroupFolder) {
+      folderInput.value = savedGroupFolder;
+    }
     let previousFolder = getGalleryFolder(root);
     root._gpGalleryFolder = previousFolder;
   
@@ -2170,10 +2207,52 @@
       }, 0);
     };
   
-    folderInput.addEventListener('change', schedule);
-    folderInput.addEventListener('blur', schedule);
+    const reopenGalleryAfterGroupFolderChange = () => {
+      root.querySelector('.dragClose')?.click();
+      setTimeout(() => {
+        const openButton = document.querySelector('#show_gallery_wand_button');
+        if (openButton instanceof HTMLElement) openButton.click();
+      }, 0);
+    };
+  
+    const commitGroupFolder = (event) => {
+      if (!groupId) return false;
+      event?.preventDefault();
+      event?.stopImmediatePropagation();
+      const folder = String(folderInput.value || '').trim();
+      if (!folder) {
+        folderInput.value = previousFolder || defaultGroupFolder;
+        return true;
+      }
+      if (folder === previousFolder) return true;
+  
+      if (folder === defaultGroupFolder) gpClearGroupGalleryFolder(groupId);
+      else gpSetGroupGalleryFolder(groupId, folder);
+      schedule();
+      reopenGalleryAfterGroupFolderChange();
+      return true;
+    };
+  
+    // SillyTavern rejects group-folder changes in its own handler. Capture these
+    // events before that handler so group chats can use the same field as DMs.
+    folderInput.addEventListener('keyup', (event) => {
+      if (groupId && event.key === 'Enter') commitGroupFolder(event);
+    }, true);
+    folderInput.addEventListener('change', (event) => {
+      if (groupId) commitGroupFolder(event);
+      else schedule();
+    }, true);
+    folderInput.addEventListener('blur', () => {
+      if (groupId && String(folderInput.value || '').trim() !== getGalleryFolder(root)) {
+        commitGroupFolder();
+      } else if (!groupId) {
+        schedule();
+      }
+    });
     topBar.addEventListener('click', (event) => {
-      if (event.target instanceof Element && event.target.closest('.fa-check')) schedule();
+      if (!(event.target instanceof Element) || !event.target.closest('.fa-check')) return;
+      if (groupId) commitGroupFolder(event);
+      else schedule();
     }, true);
     const folderPollTimer = setInterval(() => {
       if (getGalleryFolder(root) !== previousFolder) schedule();
@@ -3905,7 +3984,19 @@
   
   function getGalleryFolder(root) {
     const input = root.querySelector('.gallery-folder-input');
-    return input && 'value' in input ? String(input.value || '') : '';
+    const raw = input && 'value' in input ? String(input.value || '') : '';
+    const groupId = getActiveGroupId();
+    return groupId ? (gpGetGroupGalleryFolder(groupId) || raw) : raw;
+  }
+  
+  function getActiveGroupId() {
+    try {
+      const context = window.SillyTavern?.getContext?.();
+      const groupId = context?.groupId ?? window.selected_group;
+      return groupId === undefined || groupId === null ? '' : String(groupId).trim();
+    } catch {
+      return '';
+    }
   }
   
   function getThumbnailFilename(thumbnail) {
@@ -4238,4 +4329,3 @@
 
   initObservers();
 })();
-
