@@ -373,6 +373,9 @@ function getThumbnailFavoriteSource(root, thumbnail) {
   const filename = getThumbnailFilename(thumbnail);
   if (!filename) return '';
 
+  const fullSource = getFullGalleryItemSource(filename);
+  if (fullSource) return fullSource;
+
   const visibleSource = thumbnail.querySelector('img, video')?.src || '';
   const visibleFilename = filenameFromSource(visibleSource);
   if (visibleSource && !visibleSource.startsWith('data:')
@@ -388,6 +391,31 @@ function getThumbnailFavoriteSource(root, thumbnail) {
       : new URL(encodeURIComponent(filename), base).href;
   } catch {
     return filename;
+  }
+}
+
+function getFullGalleryItemSource(filename) {
+  const jq = window.jQuery || window.$;
+  if (typeof jq !== 'function') return '';
+
+  try {
+    const items = jq('#dragGallery').nanogallery2('data')?.items;
+    if (!Array.isArray(items)) return '';
+    const match = items.find((item) => {
+      const source = typeof item?.src === 'string' && item.src
+        ? item.src
+        : (typeof item?.responsiveURL === 'function' ? item.responsiveURL() : '');
+      return filenameFromSource(source) === filename;
+    });
+    if (!match) return '';
+
+    const source = typeof match.src === 'string' && match.src
+      ? match.src
+      : (typeof match.responsiveURL === 'function' ? match.responsiveURL() : '');
+    if (!source || String(source).startsWith('data:')) return '';
+    return new URL(source, location.href).href;
+  } catch {
+    return '';
   }
 }
 
@@ -2124,7 +2152,9 @@ function filenameFromSource(source) {
 }
 
 function filenameFromGalleryItem(item) {
-  const source = typeof item?.responsiveURL === 'function' ? item.responsiveURL() : item?.src;
+  const source = typeof item?.src === 'string' && item.src
+    ? item.src
+    : (typeof item?.responsiveURL === 'function' ? item.responsiveURL() : '');
   return filenameFromSource(source);
 }
 
