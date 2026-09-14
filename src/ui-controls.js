@@ -1432,7 +1432,11 @@ function readGalleryDataList() {
     const items = gallery.nanogallery2('data')?.items;
     if (!Array.isArray(items)) return null;
     return normalizeGalleryUrls(items.map(item => (
-      typeof item?.responsiveURL === 'function' ? item.responsiveURL() : item?.src
+      // NanoGallery may expose a responsive thumbnail through responsiveURL().
+      // The slideshow must use the original media URL when it is available.
+      typeof item?.src === 'string' && item.src
+        ? item.src
+        : (typeof item?.responsiveURL === 'function' ? item.responsiveURL() : '')
     )));
   } catch {
     return null;
@@ -1502,4 +1506,3 @@ function preload(src) {
   i.loading = 'eager';
   i.src = src;
 }
-
