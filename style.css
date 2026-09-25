@@ -598,7 +598,6 @@
   position: absolute;
   left: 50%;
   top: 50%;
-  inset: auto;
   object-fit: contain;
   width: 100%;
   height: 100%;
