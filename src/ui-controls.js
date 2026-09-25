@@ -671,6 +671,9 @@ function wireZoomAndPan(root) {
     media.replaceWith(wrap);
     wrap.appendChild(media);
     media.classList.add('gp-layer', 'base');
+    media.draggable = false;
+    media.setAttribute('draggable', 'false');
+    media.style.webkitUserDrag = 'none';
     observeZoomLayer(wrap);
   }
 
@@ -800,11 +803,20 @@ function wireZoomAndPan(root) {
       }
       return;
     }
+    event.target.draggable = false;
+    event.target.setAttribute('draggable', 'false');
+    event.target.style.webkitUserDrag = 'none';
     if (!gpSettings().zoomLock) {
       scale = 1; tx = 0; ty = 0;
     }
     applyTransform();
   });
+
+  root.addEventListener('dragstart', (event) => {
+    if (event.target instanceof HTMLImageElement && root.contains(event.target)) {
+      event.preventDefault();
+    }
+  }, true);
 
   ensureZoomLayer();
   applyTransform();
