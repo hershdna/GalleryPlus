@@ -648,6 +648,25 @@ function wireZoomAndPan(root) {
   let panStartX = 0, panStartY = 0;
   let panBaseX = 0, panBaseY = 0;
 
+  function ensureZoomLayer() {
+    const media = currentMedia(root);
+    if (!(media instanceof HTMLImageElement)) return;
+    if (media.parentElement?.classList.contains('gp-layer-wrap')) return;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'gp-layer-wrap';
+    media.replaceWith(wrap);
+    wrap.appendChild(media);
+    media.classList.add('gp-layer', 'base');
+  }
+
+  function getZoomViewport(img) {
+    const wrap = img.parentElement;
+    return wrap?.classList.contains('gp-layer-wrap')
+      ? wrap.getBoundingClientRect()
+      : img.getBoundingClientRect();
+  }
+
   function getImage() {
     const media = currentMedia(root);
     return media instanceof HTMLImageElement ? media : null;
@@ -656,9 +675,18 @@ function wireZoomAndPan(root) {
   function applyTransform() {
     const img = getImage();
     if (!img) return;
+    if (img.parentElement?.classList.contains('gp-layer-wrap')) {
+      // Resize the media layer instead of scaling a viewport-sized compositor
+      // texture. This keeps Chrome from enlarging a cached, blurry raster.
+      img.style.width = `${scale * 100}%`;
+      img.style.height = `${scale * 100}%`;
+      img.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px))`;
+      img.style.willChange = 'auto';
+      return;
+    }
     img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
     img.style.transformOrigin = 'center center';
-    img.style.willChange = 'transform';
+    img.style.willChange = 'auto';
   }
 
   function onWheel(e) {
@@ -670,7 +698,7 @@ function wireZoomAndPan(root) {
       const delta = -Math.sign(e.deltaY) * 0.1;
       const newScale = Math.min(8, Math.max(0.1, scale + delta));
       if (newScale !== scale) {
-        const rect = img.getBoundingClientRect();
+        const rect = getZoomViewport(img);
         const cx = e.clientX - rect.left;
         const cy = e.clientY - rect.top;
         const dx = (cx - rect.width / 2) / scale;
@@ -687,7 +715,7 @@ function wireZoomAndPan(root) {
     if (!gpSettings().hoverZoom) return;
     const img = getImage();
     if (!img) return;
-    const rect = img.getBoundingClientRect();
+    const rect = getZoomViewport(img);
     const nx = ((e.clientX - rect.left) / rect.width - 0.5) * -1;
     const ny = ((e.clientY - rect.top) / rect.height - 0.5) * -1;
     const z = gpSettings().hoverZoomScale || 1.08;
@@ -749,6 +777,7 @@ function wireZoomAndPan(root) {
     applyTransform();
   });
 
+  ensureZoomLayer();
   applyTransform();
 }
 
