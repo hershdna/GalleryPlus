@@ -569,11 +569,13 @@
   background: #000;
 }
 .galleryImageDraggable.draggable > .gp-layer-wrap {
-  flex: 1 1 0;
+  display: block;
+  flex: 1 1 auto;
+  align-self: stretch;
   min-width: 0;
   min-height: 0;
   width: 100% !important;
-  height: 0 !important;
+  height: auto !important;
   max-width: none !important;
   max-height: none !important;
   background: #000;
