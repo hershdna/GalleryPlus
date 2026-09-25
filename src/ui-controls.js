@@ -647,17 +647,31 @@ function wireZoomAndPan(root) {
   let isPanning = false;
   let panStartX = 0, panStartY = 0;
   let panBaseX = 0, panBaseY = 0;
+  const observedWraps = new WeakSet();
+  const resizeObserver = typeof ResizeObserver === 'function'
+    ? new ResizeObserver(() => applyTransform())
+    : null;
+
+  function observeZoomLayer(wrap) {
+    if (!(wrap instanceof HTMLElement) || observedWraps.has(wrap)) return;
+    observedWraps.add(wrap);
+    resizeObserver?.observe(wrap);
+  }
 
   function ensureZoomLayer() {
     const media = currentMedia(root);
     if (!(media instanceof HTMLImageElement)) return;
-    if (media.parentElement?.classList.contains('gp-layer-wrap')) return;
+    if (media.parentElement?.classList.contains('gp-layer-wrap')) {
+      observeZoomLayer(media.parentElement);
+      return;
+    }
 
     const wrap = document.createElement('div');
     wrap.className = 'gp-layer-wrap';
     media.replaceWith(wrap);
     wrap.appendChild(media);
     media.classList.add('gp-layer', 'base');
+    observeZoomLayer(wrap);
   }
 
   function getZoomViewport(img) {
@@ -675,12 +689,27 @@ function wireZoomAndPan(root) {
   function applyTransform() {
     const img = getImage();
     if (!img) return;
-    if (img.parentElement?.classList.contains('gp-layer-wrap')) {
-      // Resize the media layer instead of scaling a viewport-sized compositor
-      // texture. This keeps Chrome from enlarging a cached, blurry raster.
-      img.style.width = `${scale * 100}%`;
-      img.style.height = `${scale * 100}%`;
+    const wrap = img.parentElement;
+    if (wrap?.classList.contains('gp-layer-wrap')) {
+      observeZoomLayer(wrap);
+      const viewport = wrap.getBoundingClientRect();
+      const naturalWidth = img.naturalWidth;
+      const naturalHeight = img.naturalHeight;
+      if (!viewport.width || !viewport.height || !naturalWidth || !naturalHeight) {
+        img.addEventListener('load', applyTransform, { once: true });
+        return;
+      }
+
+      // Size from the source's intrinsic pixels. Resizing the CSS box forces a
+      // fresh image raster at each zoom level; scaling a transformed viewport-
+      // sized layer can leave Chrome showing its stale low-resolution texture.
+      const fit = Math.min(viewport.width / naturalWidth, viewport.height / naturalHeight);
+      const width = naturalWidth * fit * scale;
+      const height = naturalHeight * fit * scale;
+      img.style.width = `${width}px`;
+      img.style.height = `${height}px`;
       img.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px))`;
+      img.style.transformOrigin = 'center center';
       img.style.willChange = 'auto';
       return;
     }
