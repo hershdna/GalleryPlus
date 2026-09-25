@@ -819,7 +819,12 @@ function wireZoomAndPan(root) {
   }, true);
 
   ensureZoomLayer();
+  observeZoomLayer(root);
   applyTransform();
+  // Let the floating window complete its first flex layout before choosing the
+  // image's fitted dimensions. This avoids measuring the thumbnail-sized box
+  // used briefly while the viewer is being inserted.
+  requestAnimationFrame(() => requestAnimationFrame(applyTransform));
 }
 
 function wireKeyboardNav(root) {
